@@ -173,13 +173,16 @@ def accuracy(logits: torch.Tensor, target: torch.Tensor, topk=(1, 5)):
 
 
 def validate(
-    model: nn.Module, loader: Iterable, device: torch.device
+    model: nn.Module,
+    loader: Iterable,
+    device: torch.device,
+    description: str = "Validating",
 ) -> dict[str, Any]:
     model.eval()
     total = top1 = top5 = 0
     losses: list[float] = []
     with torch.no_grad():
-        for batch in loader:
+        for batch in tqdm.tqdm(loader, ncols=0, desc=description):
             x, target = batch[0].to(device).float(), batch[1].to(device).long()
             logits = model(x)
             if not torch.isfinite(logits).all():
@@ -206,7 +209,9 @@ def baseline_validation(
 ) -> dict[str, Any]:
     identity = load_checkpoint_identity(model, checkpoint, device)
     _, val_list, _ = data_paths()
-    result = validate(model, build_loader(val_list, 4, False), device)
+    result = validate(
+        model, build_loader(val_list, 4, False), device, "Task038 baseline validation"
+    )
     result["checkpoint"] = identity
     Path(output).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     return result
@@ -323,7 +328,12 @@ def fine_tune(
                 )
                 loss_sum += float(loss.item()) * int(target.numel())
                 seen += int(target.numel())
-        validation = validate(model, val_loader, next(model.parameters()).device)
+        validation = validate(
+            model,
+            val_loader,
+            next(model.parameters()).device,
+            f"Task038 F3 validation {epoch:03d}/{int(epochs):03d}",
+        )
         row = {
             "epoch": epoch,
             "train_loss": loss_sum / max(seen, 1),

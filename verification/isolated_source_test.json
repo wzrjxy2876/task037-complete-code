@@ -1,0 +1,55 @@
+{
+  "pythonpath": [
+    "pruning",
+    "models",
+    "contribution",
+    "src/task028_runtime",
+    "src/lgfr_runtime"
+  ],
+  "modules": {
+    "MC": {
+      "path": "/home/jixinye25/jxy_work1/swintrans_task037_complete/pruning/MC.py",
+      "internal": true
+    },
+    "functional_competition_pruning": {
+      "path": "/home/jixinye25/jxy_work1/swintrans_task037_complete/pruning/functional_competition_pruning.py",
+      "internal": true
+    },
+    "contribution_field_loader": {
+      "path": "/home/jixinye25/jxy_work1/swintrans_task037_complete/src/task028_runtime/contribution_field_loader.py",
+      "internal": true
+    },
+    "coverage_selector": {
+      "path": "/home/jixinye25/jxy_work1/swintrans_task037_complete/src/task028_runtime/coverage_selector.py",
+      "internal": true
+    },
+    "temporal_dynamicity": {
+      "path": "/home/jixinye25/jxy_work1/swintrans_task037_complete/src/task028_runtime/temporal_dynamicity.py",
+      "internal": true
+    },
+    "task034_mid_veto_50_logical_finetune": {
+      "path": "/home/jixinye25/jxy_work1/swintrans_task037_complete/pruning/task034_mid_veto_50_logical_finetune.py",
+      "internal": true
+    },
+    "ucf101_videoswin_my": {
+      "path": "/home/jixinye25/jxy_work1/swintrans_task037_complete/models/ucf101_videoswin_my.py",
+      "internal": true
+    },
+    "probe_cstc_contribution_tube": {
+      "path": "/home/jixinye25/jxy_work1/swintrans_task037_complete/contribution/probe_cstc_contribution_tube.py",
+      "internal": true
+    },
+    "probe_ctfrs_dynamic_function": {
+      "path": "/home/jixinye25/jxy_work1/swintrans_task037_complete/src/lgfr_runtime/probe_ctfrs_dynamic_function.py",
+      "internal": true
+    }
+  },
+  "construct_f3_registry": true,
+  "domain_total_losses": true,
+  "BMS_resolution": {
+    "InteractionPruner": true,
+    "functional_bms_method": true,
+    "rebuild_bms_domains": true
+  },
+  "status": "PASS"
+}

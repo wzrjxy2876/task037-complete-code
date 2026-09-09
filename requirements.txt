@@ -1,0 +1,16 @@
+# Third-party packages imported by the bundled Task037 source closure.
+numpy
+pandas
+matplotlib
+scipy
+Pillow
+tqdm
+torch
+torchvision
+timm
+einops
+thop
+gluoncv
+mxnet
+scikit-learn
+accimage

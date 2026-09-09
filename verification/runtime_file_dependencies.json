@@ -1,0 +1,564 @@
+{
+  "status": "PASS",
+  "package_root": "/home/jixinye25/jxy_work1/swintrans_task037_complete",
+  "bundled_first_party_source": [
+    {
+      "path": "contribution/probe_contribution_pattern_affinity.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "contribution/probe_contribution_pattern_coverage.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "contribution/probe_cstc_contribution_tube.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "models/ucf101_videoswin_my.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "pruning/MC.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "pruning/functional_competition_pruning.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "pruning/task034_mid_veto_50_logical_finetune.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/MC.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/config/swintrans.yaml",
+      "kind": "config",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/dataset/ssv2.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/dataset/transforms.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/dataset/ucf101.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/function_bms_utils.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/functional_redundancy_smoke.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/offline_cfsp_selection.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/offline_function_coverage_probe.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/offline_function_coverage_probe_fixed.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/paired_cluster_prototype_cam_smoke_adapter.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/paired_cluster_prototype_cam_utils.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_class_trajectory_weighted_coverage.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_contribution_pattern_coverage_fast.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_ctfrs_dynamic_function.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_curve_shape_discovery.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_descriptor_distinctiveness.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_descriptor_intervention.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_descriptor_stability.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_feature_intervention.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_functional_redundancy_validation.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_pair_joint_masking_redundancy.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/probe_tdcc_dynamic_function.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/representative_redundancy_cam_smoke.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/representative_redundancy_cam_utils.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/ucf101_videoswin_my.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/ucf101_videoswin_probe_adapter_v2.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/utils.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/validate_paired_cluster_prototype_cam.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/lgfr_runtime/validate_representative_redundancy_cam.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_bms_competition_domains.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_descriptor_ablation_consistency.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task011_pruning_regression.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task012_pruning_severity.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task013_cost_decoupling.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task014_functional_pruning.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task016_domain_size_calibration.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task017_high_sparsity_collapse.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task018_high_sparsity_transition.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task019_causal_ablation.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task020_functional_demand.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task022_dual_risk.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task023_average_rescue.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task024_threshold_free_adaptive_safety.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task025_total_domain_state_factorial_ablation.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task027_senior_style_logical_pruning_finetune.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task028_main50_tad_logical_finetune.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_task029_task028_type_degradation_diagnosis.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_tdd_pruning_validation.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_tdd_task009_task010_consistency.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/analyze_video_specific_third_descriptor.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/compare_pruning_run_configs.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/config/swintrans.yaml",
+      "kind": "config",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/contribution_field_loader.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/cost_decoupled_selection.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/coverage_selector.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/dataset/ssv2.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/dataset/transforms.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/dataset/ucf101.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/probe_descriptor_ablation_consistency.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/probe_task011_real_activation.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/probe_tdd_video_sanity.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/probe_video_specific_third_descriptor.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task011_runtime_audit.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task012_diagnostics.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task012_runtime_audit.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task013_diagnostics.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task013_runtime_audit.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task014_diagnostics.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task014_runtime_audit.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task015_attention_ffn_diagnosis.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task016_preflight.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task016_runtime_audit.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task017_high_sparsity_diagnosis.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task018_high_sparsity_transition.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task019_dynamic_ranking_causal_ablation.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task020_functional_demand_task_importance.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task022_average_total_dual_risk.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task023_average_rescue_causal_ablation.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task024_threshold_free_adaptive_safety.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task025_total_domain_state_factorial_ablation.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task027_senior_style_logical_pruning_finetune.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task028_main50_tad_logical_finetune.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task029_task028_type_degradation_diagnosis.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task030_average_granularity_causal_validation.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task031_domain_conditioned_average_diagnosis.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task032_average_causal_granularity_decomposition.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/task033_average_veto_mechanism_diagnosis.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/temporal_dynamicity.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "src/task028_runtime/utils.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    },
+    {
+      "path": "verification/archived_source_snapshots/task021_importance_information_retention.py",
+      "kind": "python",
+      "source_identity": "exact_match"
+    }
+  ],
+  "external_runtime_file_dependencies": [
+    {
+      "path": "${UCF101_FRAME_ROOT}/**",
+      "kind": "dataset_frames",
+      "classification": "external_data"
+    },
+    {
+      "path": "${UCF101_TRAIN_SPLIT}",
+      "kind": "dataset_split",
+      "classification": "external_data"
+    },
+    {
+      "path": "${UCF101_VAL_SPLIT}",
+      "kind": "dataset_split",
+      "classification": "external_data"
+    },
+    {
+      "path": "${MODEL_CHECKPOINT}",
+      "kind": "checkpoint",
+      "classification": "external_model_artifact"
+    },
+    {
+      "path": "${CONTRIBUTION_NPZ}",
+      "kind": "generated_contribution_field",
+      "classification": "external_generated_data"
+    },
+    {
+      "path": "${TASK017_ROOT}/**",
+      "kind": "historical_result_artifact",
+      "classification": "external_data_artifact"
+    },
+    {
+      "path": "${TASK028_ROOT}/**",
+      "kind": "historical_result_artifact",
+      "classification": "external_data_artifact"
+    },
+    {
+      "path": "${TASK029_ROOT}/**",
+      "kind": "historical_result_artifact",
+      "classification": "external_data_artifact"
+    },
+    {
+      "path": "${TASK030_ROOT}/**",
+      "kind": "historical_result_artifact",
+      "classification": "external_data_artifact"
+    },
+    {
+      "path": "${TASK031_ROOT}/**",
+      "kind": "historical_result_artifact",
+      "classification": "external_data_artifact"
+    },
+    {
+      "path": "${TASK032_ROOT}/**",
+      "kind": "historical_result_artifact",
+      "classification": "external_data_artifact"
+    },
+    {
+      "path": "${TASK033_ROOT}/**",
+      "kind": "historical_result_artifact",
+      "classification": "external_data_artifact"
+    }
+  ],
+  "historical_source_paths_required_at_runtime": 0,
+  "unresolved_first_party_source_dependencies": 0,
+  "notes": [
+    "Historical Task028/LGFR directories are provenance or archived-source authorities only; executable scripts use package-local code.",
+    "Dataset, checkpoint, generated Contribution Field, and historical result artifacts remain external data inputs."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "unresolved_first_party_source_dependencies": 0,
+  "historical_source_paths_required_at_runtime": 0,
+  "executable_source_path_scan": "PASS",
+  "scanned_executable_directories": [
+    "contribution",
+    "pruning",
+    "models",
+    "src",
+    "scripts"
+  ]
+}

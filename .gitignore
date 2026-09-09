@@ -1,0 +1,14 @@
+*.pth
+*.pt
+*.ckpt
+*.npz
+*.npy
+*.safetensors
+__pycache__/
+*.pyc
+*.swp
+*.swo
+*.swn
+
+# Large Task037 reproduction artifacts remain on server
+artifacts/

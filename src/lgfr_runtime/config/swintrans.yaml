@@ -1,0 +1,36 @@
+# slowfast_16x8_resnet101_kinetics400
+
+
+CONFIG:
+  TRAIN:
+    EPOCH_NUM: 100
+    BATCH_SIZE: 12
+    LR: 0.005
+    MOMENTUM: 0.9
+    W_DECAY: 1e-5
+    USE_WARMUP: True
+    LR_POLICY: 'Cosine'
+
+  VAL:
+    FREQ: 2
+    BATCH_SIZE: 8
+
+  DATA:
+    TRAIN_ANNO_PATH: '/data/UCF101/train_rgb_split1.txt'
+    VAL_ANNO_PATH: '/data/UCF101/val_rgb_split1.txt'
+    TRAIN_DATA_PATH: '/data/UCF101/frames/'
+    VAL_DATA_PATH:  '/data/UCF101/frames/'
+    NUM_CLASSES: 400
+    CLIP_LEN: 32
+    FRAME_RATE: 2
+    NUM_SEGMENT: 1
+    NUM_CROP: 1
+    TEST_NUM_SEGMENT: 10
+    TEST_NUM_CROP: 3
+    MULTIGRID: False
+    KEEP_ASPECT_RATIO: False
+
+  MODEL:
+    NAME: 'slowfast_16x8_resnet101_kinetics400'
+    PRETRAINED: False
+

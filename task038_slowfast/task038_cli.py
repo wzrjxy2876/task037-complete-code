@@ -164,7 +164,7 @@ def run(args) -> None:
         model = slowfast_16x8_resnet101_kinetics400(101)
         identity = load_checkpoint_identity(model, args.checkpoint, torch.device("cpu"))
         logical_prune(model, inventory, out / "selection" / "f3_registry.json")
-        batch_size = int(os.environ.get("TASK038_BATCH_SIZE", "4"))
+        batch_size = int(os.environ.get("TASK038_BATCH_SIZE", "16"))
         result = fine_tune(
             model,
             args.checkpoint,

@@ -173,7 +173,7 @@ def fine_tune(
     epochs: int,
     base_lr: float = 0.005,
     weight_decay: float = 1e-5,
-    batch_size: int = 4,
+    batch_size: int = 16,
     checkpoint_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     out = Path(output_dir)

@@ -80,6 +80,7 @@ def build_loader(
     shuffle: bool = False,
     indices: Sequence[int] | None = None,
     workers: int = 2,
+    drop_last: bool = False,
 ) -> DataLoader:
     dataset = build_dataset(split_path, indices)
     return DataLoader(
@@ -87,7 +88,7 @@ def build_loader(
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=workers,
-        drop_last=False,
+        drop_last=drop_last,
         pin_memory=torch.cuda.is_available(),
     )
 
@@ -180,9 +181,13 @@ def fine_tune(
     set_seed(3407)
     identity = checkpoint_identity or load_checkpoint_identity(model, checkpoint, torch.device("cpu"), allow_runtime_mask_buffers=True)
     train_list, val_list, _ = data_paths()
-    workers = int(os.environ.get("TASK038_WORKERS", "2"))
-    train_loader = build_loader(train_list, batch_size, True, workers=workers)
-    val_loader = build_loader(val_list, batch_size, False, workers=workers)
+    workers = int(os.environ.get("TASK038_WORKERS", "9"))
+    train_loader = build_loader(
+        train_list, batch_size, True, workers=workers, drop_last=True
+    )
+    val_loader = build_loader(
+        val_list, batch_size, True, workers=workers, drop_last=True
+    )
     model = model.to(torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu"))
     if torch.cuda.is_available() and len(device_ids) > 1:
         model = nn.DataParallel(model, device_ids=list(device_ids))
@@ -220,6 +225,13 @@ def fine_tune(
         (out / "history.json").write_text(json.dumps(history, indent=2) + "\n")
     if best is None:
         raise RuntimeError("fine-tuning produced no validation result")
-    result = {"protocol": {"seed": 3407, "criterion": "cross_entropy", "optimizer": "SGD", "lr": base_lr * 0.1, "momentum": 0.9, "weight_decay": weight_decay, "amp": False, "scheduler": "NONE"}, "checkpoint": identity, "best": best, "history": history}
+    result = {"protocol": {"seed": 3407, "criterion": "cross_entropy", "optimizer": "SGD", "lr": base_lr * 0.1, "momentum": 0.9, "weight_decay": weight_decay, "amp": False,
+        "scheduler": "NONE",
+        "batch_size": batch_size,
+        "workers": workers,
+        "train_shuffle": True,
+        "val_shuffle": True,
+        "drop_last": True,
+    }, "checkpoint": identity, "best": best, "history": history}
     (out / "finetune_result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     return result

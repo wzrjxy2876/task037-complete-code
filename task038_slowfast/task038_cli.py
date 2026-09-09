@@ -157,7 +157,6 @@ def run(args) -> None:
         model, _ = _model(args.checkpoint, device)
         logical_prune(model, inventory, out / "selection" / "f3_registry.json")
         _, val_list, _ = data_paths()
-        _, val_list, _ = data_paths()
         result = __import__("task038_slowfast.slowfast_finetune", fromlist=["validate"]).validate(model, build_loader(val_list, 4, False), device)
         _json(out / "preft_validation.json", result)
         return
@@ -165,7 +164,16 @@ def run(args) -> None:
         model = slowfast_16x8_resnet101_kinetics400(101)
         identity = load_checkpoint_identity(model, args.checkpoint, torch.device("cpu"))
         logical_prune(model, inventory, out / "selection" / "f3_registry.json")
-        result = fine_tune(model, args.checkpoint, args.gpu_ids, out / "finetune", int(os.environ.get("TASK038_EPOCHS", "100")), checkpoint_identity=identity)
+        batch_size = int(os.environ.get("TASK038_BATCH_SIZE", "4"))
+        result = fine_tune(
+            model,
+            args.checkpoint,
+            args.gpu_ids,
+            out / "finetune",
+            int(os.environ.get("TASK038_EPOCHS", "100")),
+            batch_size=batch_size,
+            checkpoint_identity=identity,
+        )
         return
     raise ValueError(args.mode)
 

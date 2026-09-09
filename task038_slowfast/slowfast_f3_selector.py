@@ -14,6 +14,7 @@ from .slowfast_functional_archive import (
     ContributionFieldArchive,
     DomainState,
     domain_total_losses,
+    marginal_coverage_losses,
     validate_partition,
 )
 from .slowfast_unit_adapter import Unit, UnitInventory

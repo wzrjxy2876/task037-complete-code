@@ -71,6 +71,11 @@ def _keep_state(model: nn.Module, registry_or_keep_state: Any) -> dict[str, tupl
             keep = list(range(width))
         elif isinstance(entry, Mapping):
             keep = entry.get("keep")
+            if keep is None and entry.get("keep_count") is not None:
+                keep_count = int(entry["keep_count"])
+                if keep_count < 0 or keep_count > width:
+                    raise ValueError(f"keep_count out of range for {name}")
+                keep = range(keep_count)
             if keep is None:
                 pruned = {int(x) for x in entry.get("pruned", [])}
                 keep = [x for x in range(width) if x not in pruned]

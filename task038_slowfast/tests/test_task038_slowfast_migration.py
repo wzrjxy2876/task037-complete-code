@@ -626,3 +626,12 @@ def test_61_formal_selection_has_no_32_step_cap():
     from task038_slowfast.task038_cli import run
     source = inspect.getsource(run)
     assert 'args.max_steps if args.mode == "prefix" else None' in source
+
+
+def test_62_counter_accepts_width_only_keep_state(structural_fixture):
+    model, _ = structural_fixture
+    report = count_structural_parameters(model, {"layers": {"fast_res2.0.conv1": {"keep_count": 7}}})
+    rows = _rows(report)
+    assert rows["fast_res2.0.conv1"]["remaining_out_channels"] == 7
+    assert rows["fast_res2.0.conv2"]["remaining_in_channels"] == 7
+    assert report["original_trainable_parameters"] - report["structural_equivalent_remaining_parameters"] == 98

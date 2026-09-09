@@ -21,7 +21,6 @@ from .slowfast_functional_archive import (
 from .slowfast_unit_adapter import Unit, UnitInventory
 from .slowfast_parameter_accounting import (
     count_structural_parameters,
-    registry_from_pruned_indices,
     write_parameter_accounting,
 )
 
@@ -211,8 +210,10 @@ def select_f3(
         for local, gid in enumerate(state.members)
     }
     max_prunable: dict[str, int] = {}
+    layer_widths: dict[str, int] = {}
     for layer in {u.module_name for u in inventory.units}:
         width = next(u.out_channels for u in inventory.units if u.module_name == layer)
+        layer_widths[layer] = int(width)
         max_prunable[layer] = int(width * (1.0 - inventory.min_keep_ratio))
     current_pruned: set[int] = set()
     layer_counts = {layer: 0 for layer in max_prunable}
@@ -251,11 +252,18 @@ def select_f3(
         len(layer_names), dtype=torch.long, device=preferred_device
     )
 
-    def accounting_for(pruned: set[int]) -> dict[str, Any]:
-        registry = registry_from_pruned_indices(structural_model, inventory, pruned)
-        return count_structural_parameters(structural_model, registry, dependency_graph)
+    def accounting_for(counts: Mapping[str, int]) -> dict[str, Any]:
+        # The counter needs only the propagated keep widths.  The final JSON
+        # registry is still built from exact global indices after selection.
+        keep_state = {
+            "layers": {
+                name: {"keep_count": layer_widths[name] - int(counts[name])}
+                for name in layer_names
+            }
+        }
+        return count_structural_parameters(structural_model, keep_state, dependency_graph)
 
-    current_accounting = accounting_for(current_pruned)
+    current_accounting = accounting_for(layer_counts)
     original_parameters = int(current_accounting["original_trainable_parameters"])
     target_parameters = float(original_parameters) * float(target_remaining_ratio)
     crossing: dict[str, Any] | None = None
@@ -293,9 +301,9 @@ def select_f3(
         gid = int(gids[pos].item())
         did, local = by_global[gid]
         unit = inventory.units[gid]
-        next_pruned = set(current_pruned)
-        next_pruned.add(gid)
-        next_accounting = accounting_for(next_pruned)
+        next_counts = dict(layer_counts)
+        next_counts[unit.module_name] += 1
+        next_accounting = accounting_for(next_counts)
         current_remaining = int(current_accounting["structural_equivalent_remaining_parameters"])
         next_remaining = int(next_accounting["structural_equivalent_remaining_parameters"])
         current_error = abs(float(current_remaining) - target_parameters)

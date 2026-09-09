@@ -11,6 +11,7 @@ from torch import nn
 
 from task038_slowfast.slowfast_f3_selector import (
     f3_components,
+    f3_order,
     global_bms_domains,
     ordinal_percentile,
     standardize_descriptors,
@@ -23,6 +24,11 @@ from task038_slowfast.slowfast_functional_archive import (
     marginal_coverage_losses,
     normalize_fields,
     validate_partition,
+)
+from task038_slowfast.slowfast_finetune import (
+    balanced_n9_indices,
+    fine_tune,
+    sample_identity_payload,
 )
 from task038_slowfast.slowfast_model_task038 import (
     _load_legacy_architecture,
@@ -100,17 +106,27 @@ def test_08_set_mask_shape_guard():
         set_mask(conv, torch.ones(2))
 
 
-def test_09_normalize_fields_shape():
-    normalized, valid = normalize_fields(np.ones((2, 3, 2, 2, 2), dtype=np.float32))
-    assert normalized.shape == (2, 3, 2, 2, 2)
-    assert valid.shape == (2, 3)
+def test_09_normalize_fields_global_concat_shape():
+    fields = np.zeros((2, 2, 1, 1, 2), dtype=np.float32)
+    fields[0, 0, 0, 0, 0] = 3.0
+    fields[1, 0, 0, 0, 0] = 4.0
+    fields[0, 1, 0, 0, 0] = -2.0
+    normalized, valid = normalize_fields(fields)
+    assert normalized.shape == (2, 4)
+    assert valid.shape == (2,)
+    assert np.allclose(normalized[0], [0.6, 0.0, 0.8, 0.0])
+    assert np.allclose(normalized[1], [-1.0, 0.0, 0.0, 0.0])
 
 
-def test_10_normalize_fields_unit_norm():
-    normalized, valid = normalize_fields(np.ones((2, 3, 2, 2, 2), dtype=np.float32))
-    norms = np.linalg.norm(normalized.reshape(2, 3, -1), axis=2)
-    assert np.all(valid)
-    assert np.allclose(norms, 1.0)
+def test_10_normalize_fields_differs_from_per_video_normalization():
+    fields = np.zeros((2, 1, 1, 1, 1), dtype=np.float32)
+    fields[0, 0, 0, 0, 0] = 3.0
+    fields[1, 0, 0, 0, 0] = 4.0
+    normalized, valid = normalize_fields(fields)
+    old_style = fields[:, 0, 0, 0, 0] / np.abs(fields[:, 0, 0, 0, 0])
+    assert valid.tolist() == [True]
+    assert np.allclose(normalized[0], [0.6, 0.8])
+    assert not np.allclose(normalized[0], old_style)
 
 
 def test_11_zero_field_is_invalid():
@@ -120,9 +136,9 @@ def test_11_zero_field_is_invalid():
 
 def test_12_signed_cosine_is_clamped():
     vectors = torch.tensor([[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0]])
-    vectors[0] /= torch.linalg.vector_norm(vectors[0])
-    vectors[1] /= torch.linalg.vector_norm(vectors[1])
-    vectors[2] /= torch.linalg.vector_norm(vectors[2])
+    vectors[0] /= torch.linalg.norm(vectors[0])
+    vectors[1] /= torch.linalg.norm(vectors[1])
+    vectors[2] /= torch.linalg.norm(vectors[2])
     matrix = build_functional_similarity(vectors, torch.tensor([True, True, True]))
     assert matrix[0, 1].item() == 0.0
     assert matrix[0, 0].item() == 1.0
@@ -171,12 +187,14 @@ def test_19_partition_rejects_overlap():
 def test_20_ordinal_ascending():
     values = torch.tensor([0.5, 0.1, 0.9])
     ranks = ordinal_percentile(values, torch.tensor([0, 1, 2]))
-    assert torch.allclose(ranks, torch.tensor([0.5, 0.0, 1.0]))
+    assert ranks.dtype == torch.float64
+    assert torch.allclose(ranks, torch.tensor([0.5, 0.0, 1.0], dtype=torch.float64))
 
 
 def test_21_ordinal_global_tie_break():
     values = torch.tensor([1.0, 1.0])
     ranks = ordinal_percentile(values, torch.tensor([9, 2]))
+    assert ranks.dtype == torch.float64
     assert ranks[1].item() == 0.0 and ranks[0].item() == 1.0
 
 
@@ -185,9 +203,9 @@ def test_22_f3_formula():
         torch.tensor([0.2, 0.8]), torch.tensor([0.9, 0.1]),
         torch.tensor([0.3, 0.4]), torch.tensor([0, 1]),
     )
-    assert torch.allclose(result["B"], torch.tensor([0.3, 1.0]))
-    assert torch.allclose(result["V"], torch.tensor([0.7, 0.0]))
-    assert torch.allclose(result["R_F3"], torch.tensor([0.65, 1.0]))
+    assert torch.allclose(result["B"], torch.tensor([0.3, 1.0], dtype=torch.float64))
+    assert torch.allclose(result["V"], torch.tensor([0.7, 0.0], dtype=torch.float64))
+    assert torch.allclose(result["R_F3"], torch.tensor([0.65, 1.0], dtype=torch.float64))
 
 
 def test_23_f3_has_no_cost_component():
@@ -285,18 +303,84 @@ def test_36_incremental_domain_state_matches_direct_replay():
     vectors = torch.randn((10, 8), generator=generator)
     valid = torch.tensor([True, True, True, False, True, True, True, True, False, True])
     vectors[~valid] = 0.0
-    vectors = vectors / torch.linalg.vector_norm(vectors, dim=1, keepdim=True).clamp_min(1e-12)
+    vectors = vectors / torch.linalg.norm(vectors, dim=1, keepdim=True).clamp_min(1e-12)
     vectors[~valid] = 0.0
     state = DomainState.create(0, list(range(10)), vectors, valid)
     for local_index in (3, 0, 1, 8, 2, 4):
         expected_losses, expected_coverage = marginal_coverage_losses(
             state.similarity, state.retained, state.valid
         )
-        torch.testing.assert_close(state.losses, expected_losses, rtol=0.0, atol=0.0)
-        torch.testing.assert_close(state.coverage, expected_coverage, rtol=0.0, atol=0.0)
+        assert torch.equal(state.losses, expected_losses)
+        assert torch.equal(state.coverage, expected_coverage)
         state.remove(local_index)
         expected_losses, expected_coverage = marginal_coverage_losses(
             state.similarity, state.retained, state.valid
         )
-        torch.testing.assert_close(state.losses, expected_losses, rtol=0.0, atol=0.0)
-        torch.testing.assert_close(state.coverage, expected_coverage, rtol=0.0, atol=0.0)
+        assert torch.equal(state.losses, expected_losses)
+        assert torch.equal(state.coverage, expected_coverage)
+
+
+def test_36_global_robust_normalization_scope():
+    from task038_slowfast.slowfast_descriptor_adapter import _robust01
+    layer_a = torch.tensor([0.0, 1.0], dtype=torch.float32)
+    layer_b = torch.tensor([100.0, 101.0], dtype=torch.float32)
+    global_values = _robust01(torch.cat((layer_a, layer_b)))
+    per_layer_values = torch.cat((_robust01(layer_a), _robust01(layer_b)))
+    assert global_values.dtype == torch.float32
+    assert not torch.allclose(global_values, per_layer_values)
+
+
+def test_37_domain_damage_is_one_minus_updated_coverage():
+    members = [0, 1, 2]
+    vectors = torch.tensor([[1.0, 0.0], [0.0, 1.0], [0.0, 1.0]])
+    state = __import__(
+        "task038_slowfast.slowfast_functional_archive",
+        fromlist=["DomainState"],
+    ).DomainState.create(
+        0, members, vectors, torch.tensor([True, True, True])
+    )
+    before = float(state.coverage.item())
+    update = state.remove(0)
+    assert update["coverage_after"] < before
+    assert np.isclose(1.0 - update["coverage_after"], 1.0 - float(state.coverage.item()))
+
+
+def test_38_exact_four_key_f3_order():
+    order = f3_order(
+        torch.tensor([0.5, 0.5, 0.5], dtype=torch.float64),
+        torch.tensor([0.2, 0.2, 0.1], dtype=torch.float64),
+        torch.tensor([0.3, 0.1, 0.3], dtype=torch.float64),
+        torch.tensor([8, 2, 4]),
+    )
+    assert order.tolist() == [2, 1, 0]
+
+
+def test_39_seeded_n9_sampler_and_identity(tmp_path):
+    split = tmp_path / "val.txt"
+    rows = []
+    for label in range(4):
+        for video in range(5):
+            rows.append(f"class{label}_v{video} 1 {label}\n")
+    split.write_text("".join(rows), encoding="utf-8")
+    a = balanced_n9_indices(str(split), seed=3407)
+    b = balanced_n9_indices(str(split), seed=3407)
+    assert a == b and len(a) == 9
+    payload = sample_identity_payload(str(split), a, 3407)
+    assert payload["sample_count"] == 9
+    assert payload["indices"] == [row["split_index"] for row in a]
+    assert len(payload["sample_identity_sha256"]) == 64
+
+
+def test_40_formal_finetune_batch16_is_explicit_user_override():
+    import inspect
+    signature = inspect.signature(fine_tune)
+    assert signature.parameters["batch_size"].default == 16
+    source = inspect.getsource(fine_tune)
+    assert '"myslowfast_default_batch_size": 4' in source
+    assert '"user_batch_size_override": bool(user_batch_size_override)' in source
+
+
+def test_41_runtime_output_separation():
+    from task038_slowfast.task038_cli import _validate_output_dir
+    with pytest.raises(ValueError):
+        _validate_output_dir(Path("/tmp/task038-out"))

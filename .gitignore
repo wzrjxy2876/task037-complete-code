@@ -12,3 +12,10 @@ __pycache__/
 
 # Large Task037 reproduction artifacts remain on server
 artifacts/
+*.log
+*.mmap
+*.memmap
+cache/
+output/
+runs/
+results/

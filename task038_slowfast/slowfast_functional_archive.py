@@ -14,15 +14,16 @@ from .slowfast_unit_adapter import UnitInventory
 
 
 def normalize_fields(fields: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Oracle helper: concatenate all videos per unit, then apply one L2 norm."""
     raw = np.asarray(fields, dtype=np.float32)
     if raw.ndim != 5:
         raise ValueError("fields must be [N,C,T,H,W]")
-    flat = raw.reshape(raw.shape[0], raw.shape[1], -1)
-    norms = np.linalg.norm(flat, axis=2).astype(np.float32)
+    flat = raw.transpose(1, 0, 2, 3, 4).reshape(raw.shape[1], -1)
+    norms = np.linalg.norm(flat, axis=1).astype(np.float32)
     valid = norms > 0.0
     normalized = np.zeros_like(flat, dtype=np.float32)
-    np.divide(flat, norms[..., None], out=normalized, where=valid[..., None])
-    return normalized.reshape(raw.shape), valid
+    np.divide(flat, norms[:, None], out=normalized, where=valid[:, None])
+    return normalized, valid
 
 
 @dataclass
@@ -58,21 +59,26 @@ class ContributionFieldArchive:
             units = [u for u in inventory.units if u.module_name == layer_name]
             if len(units) != int(fields.shape[1]):
                 raise ValueError(f"field width mismatch for {layer_name}")
-            normalized, valid = normalize_fields(fields)
+            raw = np.asarray(fields, dtype=np.float32)
+            if raw.ndim != 5:
+                raise ValueError("fields must be [N,C,T,H,W]")
+            valid = (np.linalg.norm(
+                raw.reshape(raw.shape[0], raw.shape[1], -1), axis=2
+            ).astype(np.float32) > 0.0)
             stem = layer_name.replace(".", "__")
             fpath = root / f"{stem}.fields.npy"
             vpath = root / f"{stem}.valid.npy"
-            np.save(fpath, normalized.astype(np.float32), allow_pickle=False)
+            np.save(fpath, raw, allow_pickle=False)
             np.save(vpath, valid.astype(np.bool_), allow_pickle=False)
             entries.append(
                 {
                     "layer_name": layer_name,
                     "global_start": units[0].global_index,
                     "global_end": units[-1].global_index + 1,
-                    "shape": list(normalized.shape),
+                    "shape": list(raw.shape),
                     "fields_path": fpath.name,
                     "valid_path": vpath.name,
-                    "normalization": "per-video per-unit L2 float32, no averaging",
+                    "normalization": "raw signed pooled float32; one L2 after cross-video concatenation",
                 }
             )
         manifest = {
@@ -140,7 +146,7 @@ class ContributionFieldArchive:
             array = np.asarray(aligned[order], dtype=np.float32)
             valid = torch.from_numpy(np.asarray(valid_mmap[order], dtype=np.bool_)).to(device=device)
             tensor = torch.from_numpy(array).to(device=device, dtype=torch.float32)
-            norms = torch.linalg.vector_norm(tensor, dim=1)
+            norms = torch.linalg.norm(tensor, dim=1)
             tensor = torch.where(valid[:, None], tensor / norms.clamp_min(1e-12)[:, None], torch.zeros_like(tensor))
             if not torch.isfinite(tensor).all(): raise RuntimeError("non-finite normalized contribution vector")
             return tensor, valid
@@ -168,7 +174,7 @@ class ContributionFieldArchive:
         array = np.stack(vectors).astype(np.float32, copy=False)
         tensor = torch.from_numpy(array).to(device=device, dtype=torch.float32)
         valid_tensor = torch.tensor(valid, dtype=torch.bool, device=device)
-        norms = torch.linalg.vector_norm(tensor, dim=1)
+        norms = torch.linalg.norm(tensor, dim=1)
         tensor = torch.where(
             valid_tensor[:, None], tensor / norms.clamp_min(1e-12)[:, None],
             torch.zeros_like(tensor),
@@ -185,18 +191,16 @@ def build_functional_similarity(
     valid = torch.as_tensor(valid_function_mask, dtype=torch.bool, device=vectors.device)
     if vectors.ndim != 2 or valid.shape != (vectors.shape[0],):
         raise ValueError("vectors and valid mask shape mismatch")
-    norms = torch.linalg.vector_norm(vectors, dim=1)
+    norms = torch.linalg.norm(vectors, dim=1)
     if bool(valid.any()) and not torch.allclose(
         norms[valid], torch.ones_like(norms[valid]), rtol=1e-4, atol=1e-5
     ):
         raise ValueError("active vectors must be normalized")
     if bool((~valid).any()) and bool((norms[~valid] != 0).any()):
         raise ValueError("null vectors must be exact zero")
-    return torch.nan_to_num(
-        (vectors @ vectors.T).clamp(0.0, 1.0)
-        * (valid[:, None] & valid[None, :]).to(torch.float32),
-        nan=0.0,
-    )
+    result = (vectors @ vectors.T).clamp(0.0, 1.0)
+    result = result * (valid[:, None] & valid[None, :]).to(torch.float32)
+    return torch.where(torch.isfinite(result), result, torch.zeros_like(result))
 
 
 def functional_coverage(
@@ -224,21 +228,21 @@ def marginal_coverage_losses(
     demand = valid.nonzero(as_tuple=True)[0]
     active = (retained & valid).nonzero(as_tuple=True)[0]
     if demand.numel() == 0:
-        losses[~retained] = torch.inf
+        losses[~retained] = float("inf")
         return losses, similarity.new_tensor(1.0)
     if active.numel() == 0:
-        losses[~retained] = torch.inf
+        losses[~retained] = float("inf")
         return losses, similarity.new_tensor(0.0)
     values = similarity[demand][:, active].clone()
     best, pos = values.max(1)
     if active.numel() == 1:
         second = torch.zeros_like(best)
     else:
-        values.scatter_(1, pos[:, None], -torch.inf)
+        values.scatter_(1, pos[:, None], -float("inf"))
         second = values.max(1).values
     losses.scatter_add_(0, active[pos], (best - second).clamp_min(0.0))
     losses /= demand.numel()
-    losses[~retained] = torch.inf
+    losses[~retained] = float("inf")
     return losses, best.mean()
 
 
@@ -292,13 +296,13 @@ class DomainState:
         self.losses.zero_()
         demand = self._demand_indices
         if demand.numel() == 0:
-            self.losses[~self.retained] = torch.inf
+            self.losses[~self.retained] = float("inf")
             self.coverage = self.coverage.new_tensor(1.0)
             return
         ranked_global = self._ranked_global
         ranked_values = self._ranked_values
         if ranked_global is None or ranked_values is None:
-            self.losses[~self.retained] = torch.inf
+            self.losses[~self.retained] = float("inf")
             self.coverage = self.coverage.new_tensor(0.0)
             return
         available = self.retained[ranked_global]
@@ -321,7 +325,7 @@ class DomainState:
                 best_global[has_best],
                 delta[has_best] / float(demand.numel()),
             )
-        self.losses[~self.retained] = torch.inf
+        self.losses[~self.retained] = float("inf")
         self.coverage = best_values.mean()
 
     def remove(self, local_index: int) -> dict[str, float]:
@@ -335,7 +339,7 @@ class DomainState:
                 self._initialize_incremental()
             self._refresh_incremental()
         else:
-            self.losses.fill_(torch.inf)
+            self.losses.fill_(float("inf"))
             self.coverage = torch.where(
                 self.valid.any(), self.coverage.new_tensor(0.0), self.coverage.new_tensor(1.0)
             )

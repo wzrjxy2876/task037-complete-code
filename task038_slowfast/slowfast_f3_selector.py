@@ -34,7 +34,7 @@ def _merge_sinks(sinks: torch.Tensor, tol: float) -> list[list[int]]:
         point = sinks[index]
         found = None
         for gid, rep in enumerate(representatives):
-            if float(torch.linalg.vector_norm(point - rep).item()) <= tol:
+            if float(torch.linalg.norm(point - rep).item()) <= tol:
                 found = gid
                 break
         if found is None:
@@ -64,7 +64,7 @@ def global_bms_domains(
             distances = torch.cdist(positions[start:stop], positions)
             weights = torch.exp(-(distances.square()) / (2.0 * sigma * sigma))
             updated[start:stop] = weights @ positions / weights.sum(1, keepdim=True).clamp_min(1e-8)
-        movement = torch.linalg.vector_norm(updated - positions, dim=1).max()
+        movement = torch.linalg.norm(updated - positions, dim=1).max()
         positions = updated
         if float(movement.item()) < tol:
             break
@@ -81,16 +81,40 @@ def _stable_order(values: torch.Tensor, tie_ids: torch.Tensor) -> torch.Tensor:
     return torch.from_numpy(order_cpu.astype(np.int64, copy=False)).to(values.device)
 
 
-def ordinal_percentile(values: torch.Tensor, global_indices: torch.Tensor) -> torch.Tensor:
+def ordinal_percentile(
+    values: torch.Tensor, global_indices: torch.Tensor
+) -> torch.Tensor:
     if values.ndim != 1 or global_indices.shape != values.shape:
         raise ValueError("rank tensors must be aligned")
     if values.numel() == 0:
-        return values.float()
+        return torch.empty_like(values, dtype=torch.float64)
     order = _stable_order(values, global_indices)
-    ranks = torch.empty(values.numel(), dtype=torch.float32, device=values.device)
-    positions = torch.arange(values.numel(), dtype=torch.float32, device=values.device)
+    ranks = torch.empty(
+        values.numel(), dtype=torch.float64, device=values.device
+    )
+    positions = torch.arange(
+        values.numel(), dtype=torch.float64, device=values.device
+    )
     ranks[order] = positions / float(max(values.numel() - 1, 1))
     return ranks
+
+
+def f3_order(
+    r_f3: torch.Tensor,
+    p_total: torch.Tensor,
+    p_average: torch.Tensor,
+    global_indices: torch.Tensor,
+) -> torch.Tensor:
+    """Return local positions sorted by the exact four frozen F3 keys."""
+    arrays = [
+        torch.as_tensor(x, dtype=torch.float64).detach().cpu().numpy()
+        for x in (global_indices, p_average, p_total, r_f3)
+    ]
+    order = np.lexsort((arrays[0], arrays[1], arrays[2], arrays[3]))
+    return torch.from_numpy(order.astype(np.int64, copy=False)).to(
+        device=r_f3.device
+    )
+
 
 def f3_components(
     delta_total: torch.Tensor,
@@ -98,9 +122,14 @@ def f3_components(
     domain_damage: torch.Tensor,
     global_indices: torch.Tensor,
 ) -> dict[str, torch.Tensor]:
+    # Raw deltas are intentionally float32.  Only ordinal ranks and risk
+    # arithmetic are promoted to float64 for exact tie-boundary behavior.
     p_total = ordinal_percentile(delta_total, global_indices)
     p_average = ordinal_percentile(delta_average, global_indices)
-    b = torch.maximum(p_total, domain_damage.float())
+    damage64 = torch.as_tensor(
+        domain_damage, dtype=torch.float64, device=p_total.device
+    )
+    b = torch.maximum(p_total, damage64)
     rescue = torch.maximum(p_average - b, torch.zeros_like(b))
     return {
         "p_total": p_total,
@@ -134,7 +163,7 @@ def select_f3(
     valid_cpu = torch.from_numpy(np.array(valid_np, dtype=np.bool_, copy=True))
     all_vectors = aligned_cpu.to(device=preferred_device, dtype=torch.float32)
     all_valid = valid_cpu.to(device=preferred_device, dtype=torch.bool)
-    all_norms = torch.linalg.vector_norm(all_vectors, dim=1)
+    all_norms = torch.linalg.norm(all_vectors, dim=1)
     all_vectors = torch.where(
         all_valid[:, None], all_vectors / all_norms.clamp_min(1e-12)[:, None],
         torch.zeros_like(all_vectors)
@@ -178,7 +207,7 @@ def select_f3(
         for state in states
     ]
     loss_global = torch.full(
-        (inventory.num_units,), torch.inf, dtype=torch.float32, device=preferred_device
+        (inventory.num_units,), float("inf"), dtype=torch.float32, device=preferred_device
     )
     retained_global = torch.zeros(
         inventory.num_units, dtype=torch.bool, device=preferred_device
@@ -213,10 +242,12 @@ def select_f3(
         total = average * active_count_global.index_select(0, gids)
         damage = damage_global.index_select(0, gids)
         components = f3_components(total, average, damage, gids)
-        order_t = _stable_order(gids, gids)
-        order_t = _stable_order(components["p_average"][order_t], order_t)
-        order_t = _stable_order(components["p_total"][order_t], order_t)
-        order_t = _stable_order(components["R_F3"][order_t], order_t)
+        order_t = f3_order(
+            components["R_F3"],
+            components["p_total"],
+            components["p_average"],
+            gids,
+        )
         pos = int(order_t[0].item())
         gid = int(gids[pos].item())
         did, local = by_global[gid]
@@ -229,6 +260,9 @@ def select_f3(
         update = state.remove(local)
         loss_global.index_copy_(0, member_tensors[did], state.losses)
         retained_global.index_copy_(0, member_tensors[did], state.retained)
+        damage_global.index_fill_(
+            0, member_tensors[did], 1.0 - float(state.coverage.item())
+        )
         current_pruned.add(gid)
         unit = inventory.units[gid]
         layer_counts[unit.module_name] += 1
@@ -325,3 +359,114 @@ def select_f3(
         chosen = [r for r in trace if float(r["cumulative_removed_parameters"]) / max(target_budget, 1.0) <= fraction]
         _write_json(snapshot_dir / f"snapshot_{int(fraction*100):02d}.json", {"fraction": fraction, "steps": chosen})
     return {"registry": registry, "trace": trace, "sequence_sha256": sequence_sha, "states": states}
+
+
+def reference_f3_prefix(
+    archive: ContributionFieldArchive,
+    inventory: UnitInventory,
+    domains: Sequence[Sequence[int]],
+    max_steps: int,
+    device: torch.device,
+) -> list[dict[str, Any]]:
+    """Direct replay oracle; recomputes every domain loss after each removal."""
+    domains = validate_partition(domains, inventory.num_units)
+    states: list[DomainState] = []
+    for did, members in enumerate(domains):
+        vectors, valid = archive.load_vectors(members, device)
+        states.append(DomainState.create(did, members, vectors, valid))
+    by_global = {
+        gid: (did, local)
+        for did, state in enumerate(states)
+        for local, gid in enumerate(state.members)
+    }
+    layer_names = sorted({u.module_name for u in inventory.units})
+    layer_number = {name: i for i, name in enumerate(layer_names)}
+    layer_caps = {
+        name: int(next(
+            u.out_channels for u in inventory.units if u.module_name == name
+        ) * (1.0 - inventory.min_keep_ratio))
+        for name in layer_names
+    }
+    layer_counts = {name: 0 for name in layer_names}
+    retained_global = torch.zeros(
+        inventory.num_units, dtype=torch.bool, device=device
+    )
+    loss_global = torch.full(
+        (inventory.num_units,), float("inf"), dtype=torch.float32, device=device
+    )
+    active_global = torch.zeros(
+        inventory.num_units, dtype=torch.float32, device=device
+    )
+    damage_global = torch.zeros_like(loss_global)
+    for state in states:
+        members = torch.tensor(state.members, dtype=torch.long, device=device)
+        retained_global.index_copy_(0, members, state.retained)
+        loss_global.index_copy_(0, members, state.losses)
+        active = float(state.valid.sum().item())
+        active_global.index_fill_(0, members, active)
+        damage_global.index_fill_(0, members, 1.0 - float(state.coverage.item()))
+
+    trace: list[dict[str, Any]] = []
+    for step in range(int(max_steps)):
+        unit_layer_ids = torch.tensor(
+            [layer_number[u.module_name] for u in inventory.units],
+            dtype=torch.long, device=device
+        )
+        caps = torch.tensor(
+            [layer_caps[name] for name in layer_names],
+            dtype=torch.long, device=device
+        )
+        counts = torch.tensor(
+            [layer_counts[u.module_name] for u in inventory.units],
+            dtype=torch.long, device=device
+        )
+        feasible = retained_global & (
+            counts < caps.index_select(0, unit_layer_ids)
+        )
+        gids = feasible.nonzero(as_tuple=True)[0]
+        if gids.numel() == 0:
+            break
+        average = loss_global.index_select(0, gids)
+        total = average * active_global.index_select(0, gids)
+        components = f3_components(
+            total, average, damage_global.index_select(0, gids), gids
+        )
+        pos = int(f3_order(
+            components["R_F3"], components["p_total"],
+            components["p_average"], gids
+        )[0].item())
+        gid = int(gids[pos].item())
+        did, local = by_global[gid]
+        state = states[did]
+        avg_value = float(average[pos].item())
+        total_value = float(total[pos].item())
+        damage_value = float(damage_global[gid].item())
+        state.retained[local] = False
+        if bool(state.retained.any()):
+            state.losses, state.coverage = marginal_coverage_losses(
+                state.similarity, state.retained, state.valid
+            )
+        else:
+            state.losses.fill_(float("inf"))
+            state.coverage = state.coverage.new_tensor(
+                0.0 if bool(state.valid.any()) else 1.0
+            )
+        members = torch.tensor(state.members, dtype=torch.long, device=device)
+        loss_global.index_copy_(0, members, state.losses)
+        retained_global.index_copy_(0, members, state.retained)
+        damage_global.index_fill_(
+            0, members, 1.0 - float(state.coverage.item())
+        )
+        unit = inventory.units[gid]
+        layer_counts[unit.module_name] += 1
+        trace.append({
+            "step": step + 1,
+            "global_index": gid,
+            "delta_average": avg_value,
+            "delta_total": total_value,
+            "domain_damage": damage_value,
+            "p_total": float(components["p_total"][pos].item()),
+            "p_average": float(components["p_average"][pos].item()),
+            "R_F3": float(components["R_F3"][pos].item()),
+        })
+    return trace

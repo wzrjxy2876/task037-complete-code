@@ -1,0 +1,36 @@
+{
+  "formal_task038_override": {
+    "batch_size": 16,
+    "legacy_myslowfast_default_batch_size": 4,
+    "unchanged_semantics": [
+      "shuffle=True",
+      "drop_last=True",
+      "num_workers=9",
+      "SGD trainable parameters",
+      "LR*0.1",
+      "momentum=0.9",
+      "configured weight decay",
+      "cross_entropy",
+      "FP32",
+      "no AMP",
+      "no scheduler",
+      "seed=3407"
+    ],
+    "user_batch_size_override": true
+  },
+  "references": [
+    {
+      "name": "IPslowfast.py",
+      "path": "/home/jixinye25/jxy_work1/Code/IPslowfast.py",
+      "role": "historical SlowFast topology and pruning-mask wiring",
+      "sha256": "67d2991649a3724986b0ddf52c4f124d3b9ae5cbbb30e8a5991a1cca99936488"
+    },
+    {
+      "name": "myslowfast.py",
+      "path": "/home/jixinye25/jxy_work1/Code/myslowfast.py",
+      "role": "historical data loader and recovery fine-tuning protocol; legacy default batch_size=4",
+      "sha256": "9c161a362ad066f66d00f573c5da315cd328309320ed5cc1011fb0d84c51e2af"
+    }
+  ],
+  "schema": "task038_authoritative_slowfast_reference_identity_v1"
+}

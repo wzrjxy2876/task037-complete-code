@@ -17,14 +17,16 @@ def _dynamicity(signed: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     # Exact Task037 temporal dynamicity with a singleton feature dimension.
     if signed.ndim != 6:
         raise ValueError("signed response must be [B,U,T,H,W,D]")
-    x = torch.nan_to_num(signed.float(), nan=0.0, posinf=0.0, neginf=0.0)
+    x = signed.float()
+    x = torch.where(torch.isfinite(x), x, torch.zeros_like(x))
     mean_t = x.mean(2, keepdim=True)
     residual = x - mean_t
     dynamic = residual.norm(p=2, dim=-1).mean((2, 3, 4))
     stable = mean_t.norm(p=2, dim=-1).mean((2, 3, 4))
-    return torch.nan_to_num(
-        dynamic / (dynamic + stable + eps), nan=0.0, posinf=1.0, neginf=0.0
-    ).clamp(0.0, 1.0)
+    ratio = dynamic / (dynamic + stable + eps)
+    ratio = torch.where(torch.isnan(ratio), torch.zeros_like(ratio), ratio)
+    ratio = torch.where(torch.isinf(ratio), torch.ones_like(ratio), ratio)
+    return ratio.clamp(0.0, 1.0)
 
 
 def _robust01(value: torch.Tensor, low: float = 0.01, high: float = 0.99) -> torch.Tensor:
@@ -164,19 +166,41 @@ def calibrate_descriptors(
     _run_pass(model, loader, capture_names, stats, device, batches, False)
     _run_pass(model, loader, capture_names, stats, device, batches, True)
 
-    by_layer: dict[str, torch.Tensor] = {}
-    rows: list[dict[str, Any]] = []
-    for layer_name in sorted({u.module_name for u in inventory.units}):
+    # Collect raw amplitude/frequency statistics first.  D_abs uses one
+    # robust quantile calibration over every candidate unit, not one calibration
+    # per layer.  D_rel remains the historical same-layer Schur calculation.
+    raw_mean_amp_by_layer: dict[str, torch.Tensor] = {}
+    raw_freq_by_layer: dict[str, torch.Tensor] = {}
+    layer_stats: dict[str, Any] = {}
+    layer_names = sorted({u.module_name for u in inventory.units})
+    for layer_name in layer_names:
         hook_name = layer_name.rsplit(".", 1)[0] if layer_name.endswith(".conv3") else layer_name
         s = stats[hook_name]
         mean_amp = s.sum_abs / max(s.count, 1)
         freq = (s.above if s.above is not None else torch.zeros_like(mean_amp)) / max(s.count, 1)
-        amp_n = _robust01(mean_amp)
-        freq_n = _robust01(freq)
+        raw_mean_amp_by_layer[layer_name] = mean_amp.float()
+        raw_freq_by_layer[layer_name] = freq.float()
+        layer_stats[layer_name] = s
+
+    amp_all = torch.cat([raw_mean_amp_by_layer[name] for name in layer_names])
+    freq_all = torch.cat([raw_freq_by_layer[name] for name in layer_names])
+    amp_all_n = _robust01(amp_all)
+    freq_all_n = _robust01(freq_all)
+    by_layer: dict[str, torch.Tensor] = {}
+    amp_offset = 0
+    freq_offset = 0
+    rows: list[dict[str, Any]] = []
+    for layer_name in layer_names:
+        s = layer_stats[layer_name]
+        width = raw_mean_amp_by_layer[layer_name].numel()
+        amp_n = amp_all_n[amp_offset:amp_offset + width]
+        freq_n = freq_all_n[freq_offset:freq_offset + width]
+        amp_offset += width
+        freq_offset += width
         d_abs = 0.5 * amp_n + 0.5 * freq_n
-        # Reconstructing rows is impossible from sufficient statistics; use the
-        # exact covariance implied by the collected cross moments instead.
-        covariance = s.cross / max(s.count, 1) - torch.outer(mean_amp, mean_amp)
+        covariance = s.cross / max(s.count, 1) - torch.outer(
+            raw_mean_amp_by_layer[layer_name], raw_mean_amp_by_layer[layer_name]
+        )
         covariance = covariance + 1e-5 * torch.eye(
             covariance.shape[0], device=device, dtype=torch.float32
         )
@@ -225,7 +249,7 @@ def calibrate_descriptors(
     metadata = {
         "descriptor_variant": "dynamic3d",
         "dimensions": ["D_abs", "D_rel", "D_dyn"],
-        "D_abs_normalization": {"method": "robust_quantile", "q_low": 0.01, "q_high": 0.99, "alpha": 0.5},
+        "D_abs_normalization": {"method": "robust_quantile_global", "q_low": 0.01, "q_high": 0.99, "alpha": 0.5, "scope": "all_candidate_units"},
         "D_rel": "Schur complement substitutability from Task037",
         "D_dyn": "Task037 signed temporal dynamicity",
         "unit_count": inventory.num_units,

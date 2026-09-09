@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .slowfast_finetune import balanced_n9_indices, build_loader, data_paths, set_seed
+from .slowfast_finetune import balanced_n9_indices, build_loader, data_paths, sample_identity_payload, set_seed
 from .slowfast_unit_adapter import UnitInventory
 
 
@@ -24,13 +24,6 @@ def _capture_names(inventory: UnitInventory) -> dict[str, str]:
     return result
 
 
-def _normalize_row(field: np.ndarray) -> tuple[np.ndarray, bool]:
-    flat = field.reshape(field.shape[0], -1).astype(np.float32, copy=False)
-    norm = np.linalg.norm(flat, axis=1).astype(np.float32)
-    valid = norm > 0.0
-    out = np.zeros_like(field, dtype=np.float32)
-    np.divide(field, norm[:, None, None, None], out=out, where=valid[:, None, None, None])
-    return out, bool(valid.any())
 
 
 def probe_contribution_fields(
@@ -50,7 +43,7 @@ def probe_contribution_fields(
     field_root = out / "fields"
     field_root.mkdir(exist_ok=True)
     _, val_list, _ = data_paths()
-    identity = balanced_n9_indices(val_list)
+    identity = balanced_n9_indices(val_list, seed=seed)
     loader = build_loader(
         val_list, batch_size=1, shuffle=False,
         indices=[int(row["split_index"]) for row in identity], workers=0
@@ -100,7 +93,7 @@ def probe_contribution_fields(
                     "shape": [9, len(units), 16, 7, 7],
                     "fields_path": f"{stem}.fields.npy",
                     "valid_path": f"{stem}.valid.npy",
-                    "normalization": "per-video per-unit L2 float32",
+                    "normalization": "raw signed pooled float32; one L2 after cross-video concatenation",
                 }
             )
         for sample_index, batch in enumerate(loader):
@@ -126,10 +119,9 @@ def probe_contribution_fields(
                         if mapped_hook != hook_name:
                             continue
                         units = [u for u in inventory.units if u.module_name == layer_name]
-                        normalized, _ = _normalize_row(pooled)
-                        if normalized.shape[0] != len(units):
+                        if pooled.shape[0] != len(units):
                             raise RuntimeError(f"field width mismatch at {layer_name}")
-                        memmaps[layer_name][sample_index] = normalized
+                        memmaps[layer_name][sample_index] = pooled.astype(np.float32, copy=False)
                         valmaps[layer_name][sample_index] = (
                             np.linalg.norm(pooled.reshape(pooled.shape[0], -1), axis=1) > 0.0
                         )
@@ -156,7 +148,7 @@ def probe_contribution_fields(
         "feature_dimension": 9 * 16 * 7 * 7,
         "unit_count": inventory.num_units,
         "entries": entries,
-        "no_cross_video_aggregation": True,
+        "no_per_video_normalization": True,
         "disk_backed_memmap": True,
         "seed": seed,
         "device": str(device),
@@ -164,6 +156,11 @@ def probe_contribution_fields(
     text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     (out / "field_manifest.json").write_text(text, encoding="utf-8")
     (field_root / "field_manifest.json").write_text(text, encoding="utf-8")
+    identity_payload = sample_identity_payload(val_list, identity, seed)
+    (out / "n09_sample_identity.json").write_text(
+        json.dumps(identity_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     (out / "sample_identity.json").write_text(
         json.dumps(identity, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

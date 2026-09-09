@@ -182,7 +182,7 @@ def run(args) -> None:
         )
         result = select_f3(
             archive, inventory, domains, args.target_remaining_ratio, destination,
-            device, args.max_steps, structural_model=model0,
+            device, args.max_steps if args.mode == "prefix" else None, structural_model=model0,
             dependency_graph=graph,
         )
         if args.mode == "prefix":

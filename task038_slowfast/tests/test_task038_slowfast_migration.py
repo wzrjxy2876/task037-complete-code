@@ -619,3 +619,10 @@ def test_60_target_terminology_is_explicit_in_cli():
     source = inspect.getsource(main)
     assert "target-remaining-ratio" in source
     assert "n09_remain50_exact" in source
+
+
+def test_61_formal_selection_has_no_32_step_cap():
+    import inspect
+    from task038_slowfast.task038_cli import run
+    source = inspect.getsource(run)
+    assert 'args.max_steps if args.mode == "prefix" else None' in source

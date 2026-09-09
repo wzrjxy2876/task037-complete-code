@@ -384,3 +384,103 @@ def test_41_runtime_output_separation():
     from task038_slowfast.task038_cli import _validate_output_dir
     with pytest.raises(ValueError):
         _validate_output_dir(Path("/tmp/task038-out"))
+
+
+def _site_identity_block():
+    legacy = _load_legacy_architecture()
+    block = legacy.Bottleneck(4, 1, 1, None, 1)
+    block.eval()
+    with torch.no_grad():
+        block.conv1.weight.fill_(1.0)
+        block.conv2.weight.fill_(1.0)
+    return block, torch.ones(1, 4, 2, 6, 6)
+
+
+def test_42_conv1_mask_is_immediately_before_bn1():
+    block, x = _site_identity_block()
+    attach_mask(block.conv1, 1)
+    set_mask(block.conv1, torch.zeros(1))
+    seen = {}
+    handle = block.bn1.register_forward_pre_hook(
+        lambda _module, inputs: seen.setdefault("value", inputs[0].detach().clone())
+    )
+    try:
+        block(x)
+    finally:
+        handle.remove()
+    assert torch.equal(seen["value"][:, 0], torch.zeros_like(seen["value"][:, 0]))
+
+
+def test_43_conv2_mask_is_immediately_before_bn2():
+    block, x = _site_identity_block()
+    attach_mask(block.conv2, 1)
+    set_mask(block.conv2, torch.zeros(1))
+    seen = {}
+    handle = block.bn2.register_forward_pre_hook(
+        lambda _module, inputs: seen.setdefault("value", inputs[0].detach().clone())
+    )
+    try:
+        block(x)
+    finally:
+        handle.remove()
+    assert torch.equal(seen["value"][:, 0], torch.zeros_like(seen["value"][:, 0]))
+
+
+def test_44_conv1_conv2_hooks_capture_raw_conv_outputs_before_masks():
+    block, x = _site_identity_block()
+    attach_mask(block.conv1, 1)
+    attach_mask(block.conv2, 1)
+    set_mask(block.conv1, torch.ones(1))
+    set_mask(block.conv2, torch.zeros(1))
+    seen = {}
+    handles = [
+        block.conv1.register_forward_hook(
+            lambda _module, _inputs, output: seen.setdefault("conv1", output.detach().clone())
+        ),
+        block.conv2.register_forward_hook(
+            lambda _module, _inputs, output: seen.setdefault("conv2", output.detach().clone())
+        ),
+        block.bn1.register_forward_pre_hook(
+            lambda _module, inputs: seen.setdefault("bn1", inputs[0].detach().clone())
+        ),
+        block.bn2.register_forward_pre_hook(
+            lambda _module, inputs: seen.setdefault("bn2", inputs[0].detach().clone())
+        ),
+    ]
+    try:
+        block(x)
+    finally:
+        for handle in handles:
+            handle.remove()
+    assert torch.any(seen["conv1"] != 0)
+    assert torch.any(seen["conv2"] != 0)
+    assert torch.equal(seen["bn1"], seen["conv1"])
+    assert torch.equal(seen["bn2"][:, 0], torch.zeros_like(seen["bn2"][:, 0]))
+
+
+def test_45_float32_scatter_division_order_is_adversarially_distinct():
+    delta = torch.tensor([1.0, 1e-4, 1e-4], dtype=torch.float32)
+    indices = torch.zeros(3, dtype=torch.long)
+    direct = torch.zeros(1, dtype=torch.float32)
+    direct.scatter_add_(0, indices, delta)
+    direct /= 3
+    pre_divided = torch.zeros(1, dtype=torch.float32)
+    pre_divided.scatter_add_(0, indices, delta / 3)
+    assert not torch.equal(direct, pre_divided)
+
+
+def test_46_authoritative_slowfast_config_identity():
+    from task038_slowfast.slowfast_finetune import resolve_authoritative_slowfast_config
+    identity = resolve_authoritative_slowfast_config()
+    assert identity["config_path"] == "/home/jixinye25/jxy_work1/Code/config/slowfast_16x8_resnet101_kinetics400.yaml"
+    assert identity["config_sha256"] == "11561e904abee5d6be8f2d2d47dfe5daecf24b15212184a75ccb818dd20d1199"
+    assert identity["base_lr"] == 0.005
+    assert identity["effective_ft_lr"] == 0.0005
+    assert identity["weight_decay"] == 1e-5
+    assert identity["epochs"] == 100
+
+
+def test_47_standalone_runners_use_external_formal_output_root():
+    root = Path(__file__).resolve().parents[1]
+    for path in root.glob("run_task038_*.sh"):
+        assert "/home/jixinye25/jxy_work1/task038_slowfast_runs" not in path.read_text()

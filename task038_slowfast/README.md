@@ -48,3 +48,9 @@ CUDA_VISIBLE_DEVICES=0,1 and --gpu-ids 0 1.
 
 Runtime output is outside Git at
 /data/jixinye25/work1/output/task038_slowfast_functional_coverage_migration.
+The formal LR, weight decay, and epoch count are resolved (not duplicated)
+from `CONFIG_PATHS['slowfast_resnet101']` in
+`/home/jixinye25/jxy_work1/Code/utils.py` ->
+`/home/jixinye25/jxy_work1/Code/config/slowfast_16x8_resnet101_kinetics400.yaml`
+(SHA256 `11561e904abee5d6be8f2d2d47dfe5daecf24b15212184a75ccb818dd20d1199`):
+LR `0.005`, effective FT LR `0.0005`, weight decay `1e-5`, epochs `100`.

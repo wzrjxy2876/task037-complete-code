@@ -35,3 +35,12 @@ launched only with physical GPUs 0 and 1 in tmux session MC.
 
 All runtime outputs, caches, logs, and model checkpoints are kept under
 /data/jixinye25/work1/output/..., outside this Git worktree.
+The authoritative formal training configuration is resolved from
+`CONFIG_PATHS['slowfast_resnet101']` in
+`/home/jixinye25/jxy_work1/Code/utils.py`, which resolves to
+`/home/jixinye25/jxy_work1/Code/config/slowfast_16x8_resnet101_kinetics400.yaml`
+(SHA256 `11561e904abee5d6be8f2d2d47dfe5daecf24b15212184a75ccb818dd20d1199`).
+Its verified values are `CONFIG.TRAIN.LR=0.005`, effective fine-tune LR
+`0.0005`, `CONFIG.TRAIN.W_DECAY=1e-5`, and `CONFIG.TRAIN.EPOCH_NUM=100`;
+the same identity is written into `preflight.json` and
+`finetune/finetune_config.json`.

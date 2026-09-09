@@ -43,14 +43,14 @@ def _mask(module: nn.Module, value: torch.Tensor) -> torch.Tensor:
 def _task038_bottleneck_forward(self, x):
     identity = x
     out = self.conv1(x)
+    out = _mask(self.conv1, out)
     out = self.bn1(out)
     out = self.relu(out)
-    out = _mask(self.conv1, out)
 
     out = self.conv2(out)
+    out = _mask(self.conv2, out)
     out = self.bn2(out)
     out = self.relu(out)
-    out = _mask(self.conv2, out)
 
     out = self.conv3(out)
     out = self.bn3(out)

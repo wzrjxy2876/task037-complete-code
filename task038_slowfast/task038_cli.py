@@ -21,6 +21,7 @@ from .slowfast_finetune import (
     build_loader,
     data_paths,
     fine_tune,
+    resolve_authoritative_slowfast_config,
     set_seed,
 )
 from .slowfast_functional_archive import ContributionFieldArchive, DomainState
@@ -89,6 +90,7 @@ def preflight(args) -> None:
             "archive_sha256": archive_identity[name]["sha256"],
         }
     checkpoint = Path(args.checkpoint)
+    authoritative_config = resolve_authoritative_slowfast_config()
     gpu = subprocess.run(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total", "--format=csv,noheader,nounits"], capture_output=True, text=True)
     _json(Path(args.output_dir) / "preflight.json", {
         "status": "passed",
@@ -101,6 +103,7 @@ def preflight(args) -> None:
         "max_achievable_analytical_sparsity": inventory.max_achievable_analytical_sparsity,
         "legacy_sources": archive_identity,
         "authoritative_sources": authoritative_identity,
+        "authoritative_config": authoritative_config,
         "runtime_output_root": "/data/jixinye25/work1/output",
         "checkpoint": {"path": str(checkpoint), "size_bytes": checkpoint.stat().st_size, "sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest()},
         "data_paths": dict(zip(("train", "val", "frame_root"), data_paths())),
@@ -238,6 +241,10 @@ def run(args) -> None:
         model = slowfast_16x8_resnet101_kinetics400(101)
         identity = load_checkpoint_identity(model, args.checkpoint, torch.device("cpu"))
         logical_prune(model, inventory, out / "selection" / "f3_registry.json")
+        authoritative_config = resolve_authoritative_slowfast_config()
+        configured_epochs = int(os.environ.get("TASK038_EPOCHS", str(authoritative_config["epochs"])))
+        if configured_epochs != int(authoritative_config["epochs"]):
+            raise RuntimeError("TASK038_EPOCHS does not match authoritative SlowFast config")
         batch_size = int(os.environ.get("TASK038_BATCH_SIZE", "16"))
         registry_manifest = json.loads(
             (out / "selection" / "f3_registry_manifest.json").read_text()
@@ -250,12 +257,15 @@ def run(args) -> None:
             args.checkpoint,
             args.gpu_ids,
             out / "finetune",
-            int(os.environ.get("TASK038_EPOCHS", "100")),
+            int(authoritative_config["epochs"]),
+            base_lr=float(authoritative_config["base_lr"]),
+            weight_decay=float(authoritative_config["weight_decay"]),
             batch_size=batch_size,
             checkpoint_identity=identity,
             registry_sha256=registry_manifest["sha256"],
             sequence_sha256=sequence_sha,
             user_batch_size_override=True,
+            authoritative_config=authoritative_config,
         )
         return
     raise ValueError(args.mode)

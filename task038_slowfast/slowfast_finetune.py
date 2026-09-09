@@ -1,6 +1,7 @@
 """Task038 data, checkpoint, validation, and fine-tuning protocol."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib
 import json
@@ -8,7 +9,7 @@ import os
 from pathlib import Path
 import random
 import sys
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -24,6 +25,103 @@ DEFAULT_TRAIN_LIST = "/data/jixinye25/UCF101_Frame/train_rgb_split1.txt"
 DEFAULT_VAL_LIST = "/data/jixinye25/UCF101_Frame/val_rgb_split1.txt"
 DEFAULT_FRAME_ROOT = "/data/jixinye25/UCF101_Frame/frames"
 DEFAULT_CHECKPOINT = "/home/jixinye25/jxy_work1/pretrained/slowfast-teacher-ucf101.ckpt"
+AUTHORITATIVE_UTILS_PATH = Path("/home/jixinye25/jxy_work1/Code/utils.py")
+
+
+def _authoritative_config_path() -> tuple[Path, Path, str]:
+    """Resolve CONFIG_PATHS['slowfast_resnet101'] from the real utils.py."""
+    utils_path = AUTHORITATIVE_UTILS_PATH
+    if not utils_path.is_file():
+        raise RuntimeError(f"authoritative utils.py missing: {utils_path}")
+    source = utils_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(utils_path))
+    config_root = None
+    config_filename = None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+        if "CONFIG_ROOT" in names and isinstance(node.value, ast.Constant):
+            if isinstance(node.value.value, str):
+                config_root = node.value.value
+        if "CONFIG_PATHS" in names and isinstance(node.value, ast.Dict):
+            for key, value in zip(node.value.keys, node.value.values):
+                if not isinstance(key, ast.Constant) or key.value != "slowfast_resnet101":
+                    continue
+                if (
+                    isinstance(value, ast.Call)
+                    and isinstance(value.func, ast.Attribute)
+                    and value.func.attr == "join"
+                    and len(value.args) == 2
+                    and isinstance(value.args[0], ast.Name)
+                    and value.args[0].id == "CONFIG_ROOT"
+                    and isinstance(value.args[1], ast.Constant)
+                    and isinstance(value.args[1].value, str)
+                ):
+                    config_filename = value.args[1].value
+    if config_root is None or config_filename is None:
+        raise RuntimeError(
+            "could not resolve CONFIG_PATHS['slowfast_resnet101'] from "
+            f"{utils_path}"
+        )
+    return utils_path, (utils_path.parent / config_root / config_filename).resolve(), config_filename
+
+
+def resolve_authoritative_slowfast_config() -> dict[str, Any]:
+    """Read and validate the historical SlowFast training configuration."""
+    utils_path, config_path, config_filename = _authoritative_config_path()
+    if not config_path.is_file():
+        raise RuntimeError(f"resolved SlowFast config missing: {config_path}")
+    config_text = config_path.read_text(encoding="utf-8")
+    train_indent = None
+    train_values: dict[str, str] = {}
+    in_train = False
+    for line in config_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if stripped == "TRAIN:":
+            in_train = True
+            train_indent = indent
+            continue
+        if in_train and train_indent is not None and indent <= train_indent:
+            break
+        if in_train:
+            field = stripped.split("#", 1)[0].strip()
+            if ":" not in field:
+                continue
+            key, value = field.split(":", 1)
+            if key in {"LR", "W_DECAY", "EPOCH_NUM"}:
+                train_values[key] = value.strip().strip("'\"")
+    missing = {"LR", "W_DECAY", "EPOCH_NUM"} - set(train_values)
+    if missing:
+        raise RuntimeError(f"authoritative config TRAIN fields missing: {sorted(missing)}")
+    base_lr = float(train_values["LR"])
+    weight_decay = float(train_values["W_DECAY"])
+    epochs = int(train_values["EPOCH_NUM"])
+    expected = (0.005, 1e-5, 100)
+    if (base_lr, weight_decay, epochs) != expected:
+        raise RuntimeError(
+            "authoritative SlowFast config values differ from the formal Task038 gate: "
+            f"LR={base_lr}, W_DECAY={weight_decay}, EPOCH_NUM={epochs}"
+        )
+    return {
+        "config_key": "slowfast_resnet101",
+        "utils_path": str(utils_path),
+        "utils_sha256": hashlib.sha256(utils_path.read_bytes()).hexdigest(),
+        "config_path": str(config_path),
+        "config_filename": config_filename,
+        "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
+        "base_lr": base_lr,
+        "effective_ft_lr": base_lr * 0.1,
+        "weight_decay": weight_decay,
+        "epochs": epochs,
+        "train_lr": base_lr,
+        "train_weight_decay": weight_decay,
+        "train_epoch_num": epochs,
+        "resolution": "CONFIG_PATHS['slowfast_resnet101'] resolved from authoritative Code/utils.py",
+    }
 
 
 def set_seed(seed: int = 3407) -> None:
@@ -223,16 +321,31 @@ def fine_tune(
     device_ids: Sequence[int],
     output_dir: str | Path,
     epochs: int,
-    base_lr: float = 0.005,
-    weight_decay: float = 1e-5,
+    base_lr: float | None = None,
+    weight_decay: float | None = None,
     batch_size: int = 16,
     checkpoint_identity: dict[str, Any] | None = None,
     registry_sha256: str | None = None,
     sequence_sha256: str | None = None,
     user_batch_size_override: bool = True,
+    authoritative_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if int(batch_size) != 16:
         raise ValueError("Task038 authoritative formal fine-tuning batch_size is 16")
+    resolved_config = dict(authoritative_config or resolve_authoritative_slowfast_config())
+    resolved_base_lr = float(resolved_config["base_lr"])
+    resolved_weight_decay = float(resolved_config["weight_decay"])
+    resolved_epochs = int(resolved_config["epochs"])
+    if base_lr is None:
+        base_lr = resolved_base_lr
+    elif float(base_lr) != resolved_base_lr:
+        raise ValueError("base_lr does not match authoritative SlowFast config")
+    if weight_decay is None:
+        weight_decay = resolved_weight_decay
+    elif float(weight_decay) != resolved_weight_decay:
+        raise ValueError("weight_decay does not match authoritative SlowFast config")
+    if int(epochs) != resolved_epochs:
+        raise ValueError("epochs does not match authoritative SlowFast config")
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     set_seed(3407)
@@ -285,6 +398,7 @@ def fine_tune(
         "checkpoint": identity,
         "registry_sha256": registry_sha256,
         "sequence_sha256": sequence_sha256,
+        "authoritative_config": resolved_config,
         "source_protocol": (
             "myslowfast.py helper semantics retained; formal batch_size=16 "
             "is an explicit user override of its legacy default=4"

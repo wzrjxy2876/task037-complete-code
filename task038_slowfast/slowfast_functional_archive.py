@@ -323,8 +323,9 @@ class DomainState:
             self.losses.scatter_add_(
                 0,
                 best_global[has_best],
-                delta[has_best] / float(demand.numel()),
+                delta[has_best],
             )
+        self.losses /= demand.numel()
         self.losses[~self.retained] = float("inf")
         self.coverage = best_values.mean()
 

@@ -20,7 +20,7 @@ def normalize_fields(fields: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError("fields must be [N,C,T,H,W]")
     flat = raw.transpose(1, 0, 2, 3, 4).reshape(raw.shape[1], -1)
     norms = np.linalg.norm(flat, axis=1).astype(np.float32)
-    valid = norms > 0.0
+    valid = norms > 1e-12
     normalized = np.zeros_like(flat, dtype=np.float32)
     np.divide(flat, norms[:, None], out=normalized, where=valid[:, None])
     return normalized, valid
@@ -170,7 +170,7 @@ class ContributionFieldArchive:
             row = lookup[index]
             # A function is active if at least one video has nonzero field.
             vectors.append(row)
-            valid.append(bool(np.linalg.norm(row) > 0.0))
+            valid.append(bool(np.linalg.norm(row) > 1e-12))
         array = np.stack(vectors).astype(np.float32, copy=False)
         tensor = torch.from_numpy(array).to(device=device, dtype=torch.float32)
         valid_tensor = torch.tensor(valid, dtype=torch.bool, device=device)

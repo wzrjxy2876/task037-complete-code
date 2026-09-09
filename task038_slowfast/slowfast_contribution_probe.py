@@ -123,7 +123,7 @@ def probe_contribution_fields(
                             raise RuntimeError(f"field width mismatch at {layer_name}")
                         memmaps[layer_name][sample_index] = pooled.astype(np.float32, copy=False)
                         valmaps[layer_name][sample_index] = (
-                            np.linalg.norm(pooled.reshape(pooled.shape[0], -1), axis=1) > 0.0
+                            np.linalg.norm(pooled.reshape(pooled.shape[0], -1), axis=1) > 1e-12
                         )
             model.zero_grad(set_to_none=True)
             del x, logits, score, outputs, gradients

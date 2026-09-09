@@ -48,12 +48,13 @@ def logical_prune(
         raise RuntimeError("logical pruning changed state_dict shapes")
     if before_numel != after_numel:
         raise RuntimeError("logical pruning changed parameter numel")
-    removed_cost = sum(inventory.units[i].parameter_cost for i in pruned)
+    legacy_local_cost_sum = sum(inventory.units[i].parameter_cost for i in pruned)
     report = {
         "logical_only": True,
         "pruned_global_indices": sorted(pruned),
         "removed_unit_count": len(pruned),
-        "analytical_removed_parameters": removed_cost,
+        "legacy_local_parameter_cost_sum": legacy_local_cost_sum,
+        "local_parameter_cost_is_diagnostic_only": True,
         "parameter_count_before": before_numel,
         "parameter_count_after": after_numel,
         "state_dict_shapes_unchanged": True,

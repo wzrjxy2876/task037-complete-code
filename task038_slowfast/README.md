@@ -28,8 +28,18 @@ is dependency-tied. No physical shrinking or speed claim is made.
 The frozen F3 rule is:
 B=max(p_total,domain_damage), V=max(p_average-B,0),
 R_F3=B+V/2, with float64 ordinal ranks and exact ascending tie-break
-[R_F3,p_total,p_average,global_index]. Raw Delta_average and Delta_total
-remain float32. Parameter cost is used only for the 50% stopping budget.
+[R_F3,p_total,p_average,global_index]. Raw Delta_average and Delta_total remain
+float32. F3 is used only to define the pruning order; parameter accounting is
+not a ranking term.
+
+The formal compression target is 50% remaining structural-equivalent trainable
+parameters. Define `r_remain = P_structural_remaining / P_original`; the formal
+condition is `r_remain ~= 0.50`. The selector reruns the frozen F3 trajectory
+from step 0 and the structural shape simulator chooses only between the current
+and next adjacent prefix at the target crossing. This is not 50% removed
+channels, units, or local output-filter costs. Task038 remains logical pruning:
+`actual_state_dict_parameter_ratio` stays 1.0 and physical tensor shrinking is
+not executed.
 
 Contribution fields are signed pooled X*d z_y/dX values saved in float32 per
 video/unit. They are concatenated in deterministic N=9 sample order and receive

@@ -10,6 +10,7 @@ import torch
 from torch import nn
 
 from task038_slowfast.slowfast_f3_selector import (
+    closest_prefix_choice,
     f3_components,
     f3_order,
     global_bms_domains,
@@ -36,6 +37,12 @@ from task038_slowfast.slowfast_model_task038 import (
     attach_mask,
     set_mask,
 )
+
+from task038_slowfast.slowfast_parameter_accounting import (
+    count_structural_parameters,
+    registry_from_pruned_indices,
+)
+
 from task038_slowfast.slowfast_unit_adapter import (
     Unit,
     UnitInventory,
@@ -484,3 +491,131 @@ def test_47_standalone_runners_use_external_formal_output_root():
     root = Path(__file__).resolve().parents[1]
     for path in root.glob("run_task038_*.sh"):
         assert "/home/jixinye25/jxy_work1/task038_slowfast_runs" not in path.read_text()
+
+
+@pytest.fixture(scope="module")
+def structural_fixture():
+    model = _load_legacy_architecture().slowfast_16x8_resnet101_kinetics400(101)
+    inventory = build_inventory(model)
+    return model, inventory
+
+
+def _single_accounting(fixture, layer_name):
+    model, inventory = fixture
+    unit = next(u for u in inventory.units if u.module_name == layer_name)
+    registry = registry_from_pruned_indices(model, inventory, {unit.global_index})
+    return (
+        count_structural_parameters(model),
+        count_structural_parameters(model, registry),
+    )
+
+
+def _rows(report):
+    return {row["module_name"]: row for row in report["module_parameter_shapes"]}
+
+
+def test_49_all_keep_structural_identity_exact(structural_fixture):
+    model, _ = structural_fixture
+    report = count_structural_parameters(model)
+    expected = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    assert report["original_trainable_parameters"] == 62137773 == expected
+    assert report["structural_equivalent_remaining_parameters"] == expected
+    assert report["unaccounted_trainable_parameters"] == 0
+    assert report["double_counted_parameters"] == 0
+
+
+def test_50_conv1_removal_accounts_consumer_input_exactly(structural_fixture):
+    before, after = _single_accounting(structural_fixture, "fast_res2.0.conv1")
+    rows = _rows(after)
+    assert rows["fast_res2.0.conv1"]["remaining_out_channels"] == 7
+    assert rows["fast_res2.0.conv2"]["remaining_in_channels"] == 7
+    assert before["structural_equivalent_remaining_parameters"] - after["structural_equivalent_remaining_parameters"] == 98
+
+
+def test_51_conv2_removal_accounts_conv3_input_exactly(structural_fixture):
+    before, after = _single_accounting(structural_fixture, "fast_res2.0.conv2")
+    rows = _rows(after)
+    assert rows["fast_res2.0.conv2"]["remaining_out_channels"] == 7
+    assert rows["fast_res2.0.conv3"]["remaining_in_channels"] == 7
+    assert before["structural_equivalent_remaining_parameters"] - after["structural_equivalent_remaining_parameters"] == 106
+
+
+def test_52_conv3_downsample_and_next_block_propagation(structural_fixture):
+    before, after = _single_accounting(structural_fixture, "fast_res3.0.conv3")
+    rows = _rows(after)
+    assert rows["fast_res3.0.conv3"]["remaining_out_channels"] == 63
+    assert rows["fast_res3.0.downsample.0"]["remaining_out_channels"] == 63
+    assert rows["fast_res3.0.downsample.1"]["remaining_in_channels"] == 63
+    assert rows["fast_res3.1.conv1"]["remaining_in_channels"] == 63
+    assert before["structural_equivalent_remaining_parameters"] - after["structural_equivalent_remaining_parameters"] == 100
+
+
+def test_53_conv3_without_downsample_propagates_next_input(structural_fixture):
+    before, after = _single_accounting(structural_fixture, "fast_res2.1.conv3")
+    rows = _rows(after)
+    assert "fast_res2.1.downsample.0" not in rows
+    assert rows["fast_res2.2.conv1"]["remaining_in_channels"] == 31
+    assert before["structural_equivalent_remaining_parameters"] - after["structural_equivalent_remaining_parameters"] == 34
+
+
+def test_54_lateral_to_slow_concat_accounts_consumer_and_residual(structural_fixture):
+    before, after = _single_accounting(structural_fixture, "lateral_res3.0")
+    rows = _rows(after)
+    assert rows["lateral_res3.0"]["remaining_out_channels"] == 127
+    assert rows["lateral_res3.1"]["remaining_in_channels"] == 127
+    assert rows["slow_res4.0.conv1"]["remaining_in_channels"] == 639
+    assert rows["slow_res4.0.downsample.0"]["remaining_in_channels"] == 639
+    assert before["structural_equivalent_remaining_parameters"] - after["structural_equivalent_remaining_parameters"] == 2114
+
+
+def test_55_final_feature_classifier_accounting(structural_fixture):
+    before, after = _single_accounting(structural_fixture, "fast_res5.2.conv3")
+    rows = _rows(after)
+    assert rows["fast_res5.2.conv3"]["remaining_out_channels"] == 255
+    assert rows["fc"]["remaining_in_channels"] == 2303
+    assert before["structural_equivalent_remaining_parameters"] - after["structural_equivalent_remaining_parameters"] == 167
+
+
+def test_56_accounting_is_deterministic_and_no_double_count(structural_fixture):
+    model, inventory = structural_fixture
+    unit = next(u for u in inventory.units if u.module_name == "slow_res5.2.conv3")
+    registry = registry_from_pruned_indices(model, inventory, {unit.global_index})
+    first = count_structural_parameters(model, registry)
+    second = count_structural_parameters(model, registry)
+    assert first["structural_equivalent_remaining_parameters"] == second["structural_equivalent_remaining_parameters"]
+    assert first["module_shape_sha256"] == second["module_shape_sha256"]
+    assert first["structural_equivalent_removed_parameters"] == sum(row["removed_parameters"] for row in first["module_parameter_shapes"])
+    assert first["actual_state_dict_parameter_ratio"] == 1.0
+
+
+def test_57_accounting_reports_all_trainable_modules(structural_fixture):
+    model, _ = structural_fixture
+    report = count_structural_parameters(model)
+    assert report["parameterized_module_count"] == 425
+    assert report["fixed_module_count"] == 4
+    assert report["shape_adjusted_module_count"] == 421
+    assert report["unaccounted_trainable_parameters"] == 0
+
+
+def test_58_closest_prefix_target_and_deterministic_tie_rule():
+    assert closest_prefix_choice(31, 30, 30.5) is True
+    assert closest_prefix_choice(31, 30, 30.6) is False
+    assert closest_prefix_choice(31, 30, 30.5) is True
+
+
+def test_59_formal_selector_has_no_legacy_budget_authority():
+    import inspect
+    from task038_slowfast.slowfast_f3_selector import select_f3
+    source = inspect.getsource(select_f3)
+    assert "target_budget" not in source
+    assert "while removed_cost" not in source
+    assert "structural_equivalent_remaining_parameters" in source
+    assert "sum(int(inventory.units[i].parameter_cost)" not in source
+
+
+def test_60_target_terminology_is_explicit_in_cli():
+    from task038_slowfast.task038_cli import main
+    import inspect
+    source = inspect.getsource(main)
+    assert "target-remaining-ratio" in source
+    assert "n09_remain50_exact" in source

@@ -21,9 +21,13 @@ science is archive-only: no old weighted amplitude formula, cross-layer impact,
 per-layer clustering, manifold score, heuristic split, threshold admission, or
 physical shrinking is used.
 
-All Task038 candidate units are Conv3d output channels. Analytical costs include
-the output filter, affine BN gamma/beta, and a tied downsample output filter/BN
-when present. Consumer input weights and BN running statistics are excluded.
+All Task038 candidate units are Conv3d output channels. The former 50% result
+used an incomplete local additive output-filter cost and is not the official
+50%-remaining-parameter result. The official counter derives every equivalent
+physical tensor shape from propagated keep sets and counts each trainable module
+once, including consumer inputs, residual/downsample dependencies, lateral-to-
+Slow concatenations, and final classifier input columns. The local per-unit cost
+remains diagnostic only and cannot stop selection.
 
 Formal fine-tuning is the historical SlowFast recovery recipe with one explicit
 user-controlled difference: batch size is 16, overriding the old
@@ -44,3 +48,9 @@ Its verified values are `CONFIG.TRAIN.LR=0.005`, effective fine-tune LR
 `0.0005`, `CONFIG.TRAIN.W_DECAY=1e-5`, and `CONFIG.TRAIN.EPOCH_NUM=100`;
 the same identity is written into `preflight.json` and
 `finetune/finetune_config.json`.
+
+The formal target is `target_remaining_ratio=0.50`, where
+`remaining_parameter_ratio = P_structural_remaining / P_original`. F3 remains
+the only pruning order; the structural-equivalent counter is consulted only to
+choose the closest adjacent F3 prefix when the target is crossed. Task038 is
+logical pruning, so actual state-dict tensors are unchanged.

@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import math
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import torch
 import numpy as np
@@ -18,6 +19,11 @@ from .slowfast_functional_archive import (
     validate_partition,
 )
 from .slowfast_unit_adapter import Unit, UnitInventory
+from .slowfast_parameter_accounting import (
+    count_structural_parameters,
+    registry_from_pruned_indices,
+    write_parameter_accounting,
+)
 
 
 def standardize_descriptors(descriptor: torch.Tensor) -> torch.Tensor:
@@ -145,15 +151,37 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def closest_prefix_choice(current_remaining: int, next_remaining: int, target_parameters: float) -> bool:
+    """Return whether the next adjacent F3 prefix is closer to the target."""
+    current_error = abs(float(current_remaining) - float(target_parameters))
+    next_error = abs(float(next_remaining) - float(target_parameters))
+    return next_error < current_error or (
+        next_error == current_error and next_remaining <= target_parameters
+    )
+
+
 def select_f3(
     archive: ContributionFieldArchive,
     inventory: UnitInventory,
     domains: Sequence[Sequence[int]],
-    target_budget: float,
+    target_remaining_ratio: float,
     output_dir: str | Path,
     preferred_device: torch.device,
     max_steps: int | None = None,
+    structural_model: Any | None = None,
+    dependency_graph: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Run frozen F3 and stop at the closest structural-parameter prefix.
+
+    F3 chooses the next unit.  The structural counter is consulted only after
+    that next unit has been selected, and only to choose between adjacent
+    prefixes at the target crossing.
+    """
+    if not 0.0 < float(target_remaining_ratio) <= 1.0:
+        raise ValueError("target_remaining_ratio must be in (0,1]")
+    if structural_model is None:
+        from .slowfast_model_task038 import slowfast_16x8_resnet101_kinetics400
+        structural_model = slowfast_16x8_resnet101_kinetics400(101)
     domains = validate_partition(domains, inventory.num_units)
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -172,13 +200,10 @@ def select_f3(
     states: list[DomainState] = []
     for domain_id, members in enumerate(domains):
         member_tensor = torch.tensor(members, dtype=torch.long, device=preferred_device)
-        states.append(
-            DomainState.create(
-                domain_id, members,
-                all_vectors.index_select(0, member_tensor),
-                all_valid.index_select(0, member_tensor)
-            )
-        )
+        states.append(DomainState.create(
+            domain_id, members, all_vectors.index_select(0, member_tensor),
+            all_valid.index_select(0, member_tensor)
+        ))
     del aligned_np, valid_np, aligned_cpu, valid_cpu, all_vectors, all_valid
     by_global: dict[int, tuple[int, int]] = {
         gid: (did, local)
@@ -191,7 +216,6 @@ def select_f3(
         max_prunable[layer] = int(width * (1.0 - inventory.min_keep_ratio))
     current_pruned: set[int] = set()
     layer_counts = {layer: 0 for layer in max_prunable}
-    removed_cost = 0
     trace: list[dict[str, Any]] = []
     layer_names = sorted(max_prunable)
     layer_number = {name: index for index, name in enumerate(layer_names)}
@@ -221,146 +245,194 @@ def select_f3(
         damage_value = 1.0 - float(state.coverage.item())
         active_count_global.index_fill_(0, members, active_count)
         damage_global.index_fill_(0, members, damage_value)
+        loss_global.index_copy_(0, members, state.losses)
+        retained_global.index_copy_(0, members, state.retained)
     layer_count_tensor = torch.zeros(
         len(layer_names), dtype=torch.long, device=preferred_device
     )
-    for domain_id, state in enumerate(states):
-        members = member_tensors[domain_id]
+
+    def accounting_for(pruned: set[int]) -> dict[str, Any]:
+        registry = registry_from_pruned_indices(structural_model, inventory, pruned)
+        return count_structural_parameters(structural_model, registry, dependency_graph)
+
+    current_accounting = accounting_for(current_pruned)
+    original_parameters = int(current_accounting["original_trainable_parameters"])
+    target_parameters = float(original_parameters) * float(target_remaining_ratio)
+    crossing: dict[str, Any] | None = None
+    stop_reason = "closest_structural_equivalent_parameter_prefix"
+
+    def apply_candidate(gid: int, did: int, local: int) -> None:
+        state = states[did]
+        state.remove(local)
+        members = member_tensors[did]
         loss_global.index_copy_(0, members, state.losses)
         retained_global.index_copy_(0, members, state.retained)
-    while removed_cost < target_budget:
+        damage_global.index_fill_(0, members, 1.0 - float(state.coverage.item()))
+        current_pruned.add(gid)
+        unit = inventory.units[gid]
+        layer_counts[unit.module_name] += 1
+        layer_count_tensor[layer_number[unit.module_name]] += 1
+
+    while True:
         if max_steps is not None and len(trace) >= max_steps:
+            stop_reason = "max_steps"
             break
         feasible = retained_global & (
             layer_count_tensor.index_select(0, unit_layer_ids) < layer_caps.index_select(0, unit_layer_ids)
         )
         gids = feasible.nonzero(as_tuple=True)[0]
         if gids.numel() == 0:
-            if removed_cost < target_budget:
-                raise RuntimeError("no feasible candidate remains before budget")
+            stop_reason = "no_feasible_candidate"
             break
         average = loss_global.index_select(0, gids)
         total = average * active_count_global.index_select(0, gids)
         damage = damage_global.index_select(0, gids)
         components = f3_components(total, average, damage, gids)
-        order_t = f3_order(
-            components["R_F3"],
-            components["p_total"],
-            components["p_average"],
-            gids,
-        )
+        order_t = f3_order(components["R_F3"], components["p_total"], components["p_average"], gids)
         pos = int(order_t[0].item())
         gid = int(gids[pos].item())
         did, local = by_global[gid]
         unit = inventory.units[gid]
-        cost = unit.parameter_cost
+        next_pruned = set(current_pruned)
+        next_pruned.add(gid)
+        next_accounting = accounting_for(next_pruned)
+        current_remaining = int(current_accounting["structural_equivalent_remaining_parameters"])
+        next_remaining = int(next_accounting["structural_equivalent_remaining_parameters"])
+        current_error = abs(float(current_remaining) - target_parameters)
+        next_error = abs(float(next_remaining) - target_parameters)
+        is_crossing = current_remaining >= target_parameters and next_remaining <= target_parameters
+        if is_crossing:
+            choose_next = closest_prefix_choice(current_remaining, next_remaining, target_parameters)
+            crossing = {
+                "before_step": len(trace),
+                "after_step": len(trace) + 1,
+                "before_remaining_parameters": current_remaining,
+                "before_remaining_ratio": current_remaining / original_parameters,
+                "before_error_parameters": current_error,
+                "after_remaining_parameters": next_remaining,
+                "after_remaining_ratio": next_remaining / original_parameters,
+                "after_error_parameters": next_error,
+                "selected_after": choose_next,
+            }
+            if not choose_next:
+                break
+        cost = int(unit.parameter_cost)
         avg_value = float(average[pos].item())
         total_value = float(total[pos].item())
         damage_value = float(damage[pos].item())
-        state = states[did]
-        update = state.remove(local)
-        loss_global.index_copy_(0, member_tensors[did], state.losses)
-        retained_global.index_copy_(0, member_tensors[did], state.retained)
-        damage_global.index_fill_(
-            0, member_tensors[did], 1.0 - float(state.coverage.item())
-        )
-        current_pruned.add(gid)
-        unit = inventory.units[gid]
-        layer_counts[unit.module_name] += 1
-        layer_count_tensor[layer_number[unit.module_name]] += 1
-        before_cost = removed_cost
-        removed_cost += int(cost)
-        trace.append(
-            {
-                "step": len(trace) + 1,
-                "global_index": gid,
-                "layer_name": unit.layer_name,
-                "local_channel_index": unit.local_channel_index,
-                "pathway": unit.pathway,
-                "stage": unit.stage,
-                "block": unit.block,
-                "conv_position": unit.conv_position,
-                "domain_id": did,
-                "domain_size": len(state.members),
-                "domain_active_size": int(state.valid.sum().item()),
-                "delta_average": avg_value,
-                "delta_total": total_value,
-                "domain_damage": damage_value,
-                "p_total": float(components["p_total"][pos].item()),
-                "p_average": float(components["p_average"][pos].item()),
-                "B": float(components["B"][pos].item()),
-                "V": float(components["V"][pos].item()),
-                "R_F3": float(components["R_F3"][pos].item()),
-                "parameter_cost": int(cost),
-                "budget_before": before_cost,
-                "cumulative_removed_parameters": removed_cost,
-                "selected": True,
-            }
-        )
+        apply_candidate(gid, did, local)
+        current_accounting = next_accounting
+        trace.append({
+            "step": len(trace) + 1,
+            "global_index": gid,
+            "layer_name": unit.layer_name,
+            "local_channel_index": unit.local_channel_index,
+            "pathway": unit.pathway,
+            "stage": unit.stage,
+            "block": unit.block,
+            "conv_position": unit.conv_position,
+            "domain_id": did,
+            "domain_size": len(states[did].members),
+            "domain_active_size": int(states[did].valid.sum().item()),
+            "delta_average": avg_value,
+            "delta_total": total_value,
+            "domain_damage": damage_value,
+            "p_total": float(components["p_total"][pos].item()),
+            "p_average": float(components["p_average"][pos].item()),
+            "B": float(components["B"][pos].item()),
+            "V": float(components["V"][pos].item()),
+            "R_F3": float(components["R_F3"][pos].item()),
+            "legacy_local_parameter_cost": cost,
+            "structural_equivalent_remaining_parameters": next_remaining,
+            "structural_equivalent_remaining_ratio": next_remaining / original_parameters,
+            "selected": True,
+        })
+        if is_crossing:
+            break
+
     registry_layers: dict[str, dict[str, Any]] = {}
     for layer in sorted(max_prunable):
         units = [u for u in inventory.units if u.module_name == layer]
         pruned = sorted(u.local_channel_index for u in units if u.global_index in current_pruned)
         keep = sorted(set(range(units[0].out_channels)) - set(pruned))
         registry_layers[layer] = {
-            "total": units[0].out_channels,
-            "pruned": pruned,
-            "keep": keep,
-            "pruned_count": len(pruned),
-            "keep_count": len(keep),
+            "total": units[0].out_channels, "pruned": pruned, "keep": keep,
+            "pruned_count": len(pruned), "keep_count": len(keep),
         }
+    final_remaining = int(current_accounting["structural_equivalent_remaining_parameters"])
+    final_ratio = final_remaining / original_parameters
+    legacy_sum = sum(int(row["legacy_local_parameter_cost"]) for row in trace)
     registry = {
-        "schema": "task038_f3_registry_v1",
+        "schema": "task038_f3_registry_v2",
         "selection_method": "dynamic global F3 fixed BMS",
-        "target_budget": float(target_budget),
-        "removed_parameter_cost": int(removed_cost),
+        "target_remaining_ratio": float(target_remaining_ratio),
+        "target_parameters_real": target_parameters,
+        "selected_final_prefix_step": len(trace),
+        "structural_equivalent_remaining_parameters": final_remaining,
+        "structural_equivalent_removed_parameters": original_parameters - final_remaining,
+        "remaining_parameter_ratio": final_ratio,
+        "parameter_pruning_ratio": 1.0 - final_ratio,
+        "legacy_local_parameter_cost_sum": legacy_sum,
         "layers": registry_layers,
         "pruned_global_indices": sorted(current_pruned),
         "trace_length": len(trace),
+        "stop_reason": stop_reason,
     }
     trace_path = out / "functional_selection_trace.csv"
     fields = list(trace[0]) if trace else ["step", "global_index"]
     with trace_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(trace)
+        writer.writeheader(); writer.writerows(trace)
     seq_path = out / "f3_selection_sequence.csv"
     with seq_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["step", "global_index", "parameter_cost"])
+        writer = csv.DictWriter(handle, fieldnames=["step", "global_index", "legacy_local_parameter_cost"])
         writer.writeheader()
-        writer.writerows(
-            {"step": r["step"], "global_index": r["global_index"], "parameter_cost": r["parameter_cost"]}
-            for r in trace
-        )
+        writer.writerows({"step": r["step"], "global_index": r["global_index"],
+                          "legacy_local_parameter_cost": r["legacy_local_parameter_cost"]} for r in trace)
     sequence_sha = hashlib.sha256(seq_path.read_bytes()).hexdigest()
     (out / "f3_selection_sequence.sha256").write_text(sequence_sha + "\n", encoding="utf-8")
     _write_json(out / "f3_registry.json", registry)
     _write_json(out / "f3_registry_manifest.json", {"sha256": hashlib.sha256((out / "f3_registry.json").read_bytes()).hexdigest(), "sequence_sha256": sequence_sha, "schema": registry["schema"]})
-    structures = {
-        "stage": {},
-        "pathway": {},
-        "domain": {},
-    }
+    structures = {"stage": {}, "pathway": {}, "domain": {}}
     for unit in inventory.units:
         is_pruned = unit.global_index in current_pruned
         for key, value in (("stage", unit.stage), ("pathway", unit.pathway)):
-            bucket = structures[key].setdefault(value, {"total": 0, "pruned": 0, "removed_parameter_cost": 0})
-            bucket["total"] += 1
-            bucket["pruned"] += int(is_pruned)
-            bucket["removed_parameter_cost"] += int(is_pruned) * unit.parameter_cost
+            bucket = structures[key].setdefault(value, {"total": 0, "pruned": 0, "legacy_local_parameter_cost": 0})
+            bucket["total"] += 1; bucket["pruned"] += int(is_pruned)
+            bucket["legacy_local_parameter_cost"] += int(is_pruned) * unit.parameter_cost
     for did, members in enumerate(domains):
-        structures["domain"][str(did)] = {"total": len(members), "pruned": sum(int(x in current_pruned) for x in members)}
+        structures["domain"][str(did)] = {"total": len(members), "pruned": sum(x in current_pruned for x in members)}
     _write_json(out / "f3_stage_structure.json", structures["stage"])
     _write_json(out / "f3_pathway_structure.json", structures["pathway"])
     _write_json(out / "f3_domain_structure.json", structures["domain"])
     _write_json(out / "f3_layer_structure.json", registry_layers)
-    snapshot_dir = out / "snapshots"
-    snapshot_dir.mkdir(exist_ok=True)
-    for fraction in (0.0, 0.05, 0.10, 0.20, 0.30, 0.50):
-        chosen = [r for r in trace if float(r["cumulative_removed_parameters"]) / max(target_budget, 1.0) <= fraction]
-        _write_json(snapshot_dir / f"snapshot_{int(fraction*100):02d}.json", {"fraction": fraction, "steps": chosen})
-    return {"registry": registry, "trace": trace, "sequence_sha256": sequence_sha, "states": states}
-
+    target_payload = {
+        "P_original": original_parameters,
+        "target_remaining_ratio": float(target_remaining_ratio),
+        "P_target_real": target_parameters,
+        "P_target_floor": math.floor(target_parameters),
+        "P_target_ceil": math.ceil(target_parameters),
+        "prefix_before_crossing_step": None if crossing is None else crossing["before_step"],
+        "prefix_before_remaining_parameters": None if crossing is None else crossing["before_remaining_parameters"],
+        "prefix_before_remaining_ratio": None if crossing is None else crossing["before_remaining_ratio"],
+        "prefix_before_error_parameters": None if crossing is None else crossing["before_error_parameters"],
+        "prefix_after_crossing_step": None if crossing is None else crossing["after_step"],
+        "prefix_after_remaining_parameters": None if crossing is None else crossing["after_remaining_parameters"],
+        "prefix_after_remaining_ratio": None if crossing is None else crossing["after_remaining_ratio"],
+        "prefix_after_error_parameters": None if crossing is None else crossing["after_error_parameters"],
+        "selected_final_prefix_step": len(trace),
+        "final_remaining_parameters": final_remaining,
+        "final_removed_parameters": original_parameters - final_remaining,
+        "final_remaining_ratio": final_ratio,
+        "final_parameter_pruning_ratio": 1.0 - final_ratio,
+        "absolute_target_error_parameters": abs(float(final_remaining) - target_parameters),
+        "absolute_target_error_ratio": abs(final_ratio - float(target_remaining_ratio)),
+        "absolute_target_error_percentage_points": abs(final_ratio - float(target_remaining_ratio)) * 100.0,
+        "stop_reason": stop_reason,
+    }
+    _write_json(out / "remaining_parameter_target.json", target_payload)
+    write_parameter_accounting(current_accounting, out / "parameter_accounting")
+    return {"registry": registry, "trace": trace, "sequence_sha256": sequence_sha, "states": states, "accounting": current_accounting, "target": target_payload}
 
 def reference_f3_prefix(
     archive: ContributionFieldArchive,

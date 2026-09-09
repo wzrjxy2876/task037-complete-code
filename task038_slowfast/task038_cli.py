@@ -31,6 +31,7 @@ from .slowfast_model_task038 import (
     slowfast_16x8_resnet101_kinetics400,
 )
 from .slowfast_unit_adapter import build_inventory, validate_canonical_order
+from .slowfast_parameter_accounting import count_structural_parameters, write_parameter_accounting
 
 
 def _json(path: Path, payload: Any) -> None:
@@ -62,6 +63,13 @@ def preflight(args) -> None:
     inventory = build_inventory(inventory_model, 0.1)
     validate_canonical_order(inventory)
     graph = build_dependency_graph(inventory_model, inventory)
+    all_keep_accounting = count_structural_parameters(inventory_model, None, graph)
+    all_keep_difference = (
+        all_keep_accounting["structural_equivalent_remaining_parameters"]
+        - all_keep_accounting["original_trainable_parameters"]
+    )
+    if all_keep_difference != 0:
+        raise RuntimeError("all-keep structural parameter identity failed")
     structure = Path(args.output_dir) / "structure"
     inventory.write(structure / "unit_inventory.json")
     write_dependency_graph(structure / "dependency_graph.json", graph, inventory)
@@ -97,9 +105,12 @@ def preflight(args) -> None:
         "base_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
         "branch": "task_038_slowfast_functional_coverage_migration",
         "architecture": "slowfast_16x8_resnet101_kinetics400",
+        "target_remaining_ratio": float(args.target_remaining_ratio),
         "candidate_definition": "one Conv3d output channel",
         "unit_count": inventory.num_units,
         "total_model_parameters": inventory.total_model_parameters,
+        "all_keep_structural_equivalent_parameters": all_keep_accounting["structural_equivalent_remaining_parameters"],
+        "all_keep_difference": all_keep_difference,
         "max_achievable_analytical_sparsity": inventory.max_achievable_analytical_sparsity,
         "legacy_sources": archive_identity,
         "authoritative_sources": authoritative_identity,
@@ -164,77 +175,79 @@ def run(args) -> None:
     if args.mode in ("prefix", "selection"):
         domains = json.loads((out / "bms" / "bms_domains.json").read_text())["domains"]
         archive = ContributionFieldArchive(out / "contribution" / "fields", inventory)
-        target = 0.5 * inventory.total_model_parameters
+        graph = build_dependency_graph(model0, inventory)
         destination = (
             out / "selection_prefix" / "run1"
             if args.mode == "prefix" else out / "selection"
         )
-        result = select_f3(archive, inventory, domains, target, destination, device, args.max_steps if args.mode == "prefix" else None)
+        result = select_f3(
+            archive, inventory, domains, args.target_remaining_ratio, destination,
+            device, args.max_steps, structural_model=model0,
+            dependency_graph=graph,
+        )
         if args.mode == "prefix":
             prefix_root = out / "selection_prefix"
             select_f3(
-                archive, inventory, domains, target,
-                prefix_root / "run2", device, args.max_steps
+                archive, inventory, domains, args.target_remaining_ratio,
+                prefix_root / "run2", device, args.max_steps,
+                structural_model=model0, dependency_graph=graph,
             )
             first = prefix_root / "run1" / "f3_selection_sequence.csv"
             second = prefix_root / "run2" / "f3_selection_sequence.csv"
-            run1_bytes = first.read_bytes()
-            run2_bytes = second.read_bytes()
+            run1_bytes, run2_bytes = first.read_bytes(), second.read_bytes()
             shutil.copyfile(first, prefix_root / "run1_sequence.csv")
             shutil.copyfile(second, prefix_root / "run2_sequence.csv")
-            run1_sha = hashlib.sha256(run1_bytes).hexdigest()
-            run2_sha = hashlib.sha256(run2_bytes).hexdigest()
+            run1_sha, run2_sha = hashlib.sha256(run1_bytes).hexdigest(), hashlib.sha256(run2_bytes).hexdigest()
             _json(prefix_root / "run1_sequence_sha256.json", {"sha256": run1_sha})
             _json(prefix_root / "run2_sequence_sha256.json", {"sha256": run2_sha})
             if run1_bytes != run2_bytes:
                 raise RuntimeError("prefix replay is not deterministic")
-            oracle = reference_f3_prefix(
-                archive, inventory, domains, args.max_steps, device
-            )
+            oracle = reference_f3_prefix(archive, inventory, domains, args.max_steps, device)
             production = result["trace"][:args.max_steps]
-            keys = (
-                "global_index", "delta_average", "delta_total",
-                "domain_damage", "p_total", "p_average", "R_F3"
-            )
-            production_projection = [
-                {key: row[key] for key in keys} for row in production
-            ]
-            oracle_projection = [
-                {key: row[key] for key in keys} for row in oracle
-            ]
+            keys = ("global_index", "delta_average", "delta_total", "domain_damage", "p_total", "p_average", "R_F3")
+            production_projection = [{key: row[key] for key in keys} for row in production]
+            oracle_projection = [{key: row[key] for key in keys} for row in oracle]
             if production_projection != oracle_projection:
-                _json(prefix_root / "exactness_gate.json", {
-                    "status": "failed",
-                    "production_steps": production_projection,
-                    "oracle_steps": oracle_projection,
-                })
+                _json(prefix_root / "exactness_gate.json", {"status": "failed", "production_steps": production_projection, "oracle_steps": oracle_projection})
                 raise RuntimeError("production F3 prefix diverges from direct oracle")
-            _json(prefix_root / "reference_oracle.json", {
-                "steps": oracle, "max_steps": args.max_steps
-            })
-            _json(prefix_root / "exactness_gate.json", {
-                "status": "passed",
-                "steps": len(oracle),
-                "production_vs_oracle_exact": True,
-                "run1_vs_run2_byte_identical": run1_bytes == run2_bytes,
-                "run1_sequence_sha256": run1_sha,
-                "run2_sequence_sha256": run2_sha,
-            })
+            _json(prefix_root / "reference_oracle.json", {"steps": oracle, "max_steps": args.max_steps})
+            _json(prefix_root / "exactness_gate.json", {"status": "passed", "steps": len(oracle), "production_vs_oracle_exact": True, "run1_vs_run2_byte_identical": run1_bytes == run2_bytes, "run1_sequence_sha256": run1_sha, "run2_sequence_sha256": run2_sha})
         else:
-            _json(out / "selection_summary.json", {"status": "passed" if result["registry"]["removed_parameter_cost"] >= target else "failed", "target_budget": target, "removed_parameter_cost": result["registry"]["removed_parameter_cost"], "overshoot": result["registry"]["removed_parameter_cost"] - target})
+            accounting = result["accounting"]
+            _json(out / "selection_summary.json", {
+                "status": "passed",
+                "target_remaining_ratio": float(args.target_remaining_ratio),
+                "target_parameters_real": result["target"]["P_target_real"],
+                "selected_final_prefix_step": result["target"]["selected_final_prefix_step"],
+                "structural_equivalent_remaining_parameters": accounting["structural_equivalent_remaining_parameters"],
+                "remaining_parameter_ratio": accounting["remaining_parameter_ratio"],
+                "stop_reason": result["target"]["stop_reason"],
+            })
         return
     if args.mode == "logical":
         model, _ = _model(args.checkpoint, device)
         registry = out / "selection" / "f3_registry.json"
         report = logical_prune(model, inventory, registry)
         report.update(forward_backward_gate(model, device))
+        accounting = count_structural_parameters(model, registry, build_dependency_graph(model, inventory))
+        write_parameter_accounting(accounting, out / "parameter_accounting")
+        report.update({key: value for key, value in accounting.items() if key != "module_parameter_shapes"})
         _json(out / "logical_pruning.json", report)
         return
     if args.mode == "preft":
         model, _ = _model(args.checkpoint, device)
-        logical_prune(model, inventory, out / "selection" / "f3_registry.json")
+        registry = out / "selection" / "f3_registry.json"
+        logical_prune(model, inventory, registry)
+        accounting = count_structural_parameters(model, registry, build_dependency_graph(model, inventory))
+        write_parameter_accounting(accounting, out / "parameter_accounting")
         _, val_list, _ = data_paths()
         result = __import__("task038_slowfast.slowfast_finetune", fromlist=["validate"]).validate(model, build_loader(val_list, 4, False), device)
+        result.update({
+            "structural_equivalent_remaining_parameters": accounting["structural_equivalent_remaining_parameters"],
+            "remaining_parameter_ratio": accounting["remaining_parameter_ratio"],
+            "parameter_pruning_ratio": accounting["parameter_pruning_ratio"],
+            "actual_state_dict_parameter_ratio": accounting["actual_state_dict_parameter_ratio"],
+        })
         _json(out / "preft_validation.json", result)
         return
     if args.mode == "finetune":
@@ -275,9 +288,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", required=True, choices=("preflight", "baseline", "descriptors", "bms", "contribution", "numerical", "prefix", "selection", "logical", "preft", "finetune"))
     parser.add_argument("--checkpoint", default=os.environ.get("TASK038_CHECKPOINT", "/home/jixinye25/jxy_work1/pretrained/slowfast-teacher-ucf101.ckpt"))
-    parser.add_argument("--output_dir", default=os.environ.get("TASK038_OUTPUT_DIR", "/data/jixinye25/work1/output/task038_slowfast_functional_coverage_migration/n09_prune50_exact"))
+    parser.add_argument("--output_dir", default=os.environ.get("TASK038_OUTPUT_DIR", "/data/jixinye25/work1/output/task038_slowfast_functional_coverage_migration/n09_remain50_exact"))
     parser.add_argument("--device", default=os.environ.get("TASK038_DEVICE", "cuda:0"))
     parser.add_argument("--max_steps", type=int, default=32)
+    parser.add_argument("--target-remaining-ratio", type=float, default=float(os.environ.get("TASK038_TARGET_REMAINING_RATIO", "0.50")))
     parser.add_argument("--gpu-ids", dest="gpu_ids", type=int, nargs="+", default=[0, 1])
     args = parser.parse_args()
     run(args)

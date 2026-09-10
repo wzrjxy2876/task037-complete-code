@@ -75,6 +75,14 @@ def test_selector_avoids_duplicate_full_archive_gpu_allocation():
     assert "del all_norms" in source
 
 
+def test_prefix_materialization_slices_validity_with_vectors():
+    from task038_slowfast import slowfast_functional_archive as archive
+
+    source = inspect.getsource(archive.ContributionFieldArchive.materialize_aligned)
+    assert "valid[:sample_count]" in source
+    assert "valid_aligned[start:end]" in source
+
+
 def test_worker_has_no_finetuning_call_and_has_preft_validation():
     source = inspect.getsource(sweep._run_cli) + inspect.getsource(sweep._run_one)
     assert '"preft"' in source

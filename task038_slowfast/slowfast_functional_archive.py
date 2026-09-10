@@ -124,7 +124,12 @@ class ContributionFieldArchive:
                 raise ValueError("field archive has fewer samples than its manifest")
             block = np.asarray(array[:sample_count], dtype=np.float32).transpose(1, 0, 2, 3, 4).reshape(end - start, feature_dim)
             aligned[start:end] = block
-            valid_aligned[start:end] = np.asarray(valid, dtype=np.bool_).any(axis=0)
+            # Keep the validity mask on the same prefix as the aligned
+            # vectors.  The shared N=45 archive is viewed as N-prefixes;
+            # suffix-only activity must not mark an N-prefix zero row active.
+            valid_aligned[start:end] = np.asarray(
+                valid[:sample_count], dtype=np.bool_
+            ).any(axis=0)
         aligned.flush()
         valid_aligned.flush()
         return target

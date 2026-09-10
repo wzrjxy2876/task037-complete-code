@@ -76,6 +76,8 @@ def _verify_upstream(
     reference_output: Path,
     checkpoint: Path,
     sweep_root: Path,
+    *,
+    write_manifest: bool = True,
 ) -> dict[str, Any]:
     preflight_path = reference_output / "preflight.json"
     inventory_path = reference_output / "structure" / "unit_inventory.json"
@@ -162,7 +164,8 @@ def _verify_upstream(
         "sample_identity": sample_identity,
         "science_unchanged_by_sweep": True,
     }
-    _json(sweep_root / "upstream_reuse_manifest.json", identity)
+    if write_manifest:
+        _json(sweep_root / "upstream_reuse_manifest.json", identity)
     return identity
 
 
@@ -821,7 +824,31 @@ def main() -> None:
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--sweep-root", type=Path, default=SWEEP_ROOT)
     parser.add_argument("--reference-output", type=Path, default=REFERENCE_OUTPUT)
+    parser.add_argument(
+        "--sigmas",
+        type=float,
+        nargs="+",
+        default=None,
+        help="optional subset of the frozen 11-value sigma grid",
+    )
+    parser.add_argument(
+        "--read-only-upstream",
+        action="store_true",
+        help="verify upstream without writing the shared reuse manifest",
+    )
     args = parser.parse_args()
+
+    selected_sigmas = SIGMAS if args.sigmas is None else tuple(args.sigmas)
+    if not selected_sigmas:
+        raise ValueError("--sigmas must contain at least one value")
+    if len(set(round(sigma, 6) for sigma in selected_sigmas)) != len(selected_sigmas):
+        raise ValueError("--sigmas must not contain duplicates")
+    invalid_sigmas = [
+        sigma for sigma in selected_sigmas
+        if not any(abs(sigma - allowed) <= 1e-12 for allowed in SIGMAS)
+    ]
+    if invalid_sigmas:
+        raise ValueError(f"sigma values outside frozen grid: {invalid_sigmas}")
 
     sweep_root = args.sweep_root.resolve()
     reference_output = args.reference_output.resolve()
@@ -831,12 +858,17 @@ def main() -> None:
         raise FileExistsError(f"refusing to overwrite completed sweep: {sweep_root}")
     print("=== Task038 controlled BMS sigma sweep ===", flush=True)
     print(
-        "sigmas=" + ",".join(f"{sigma:.3f}" for sigma in SIGMAS),
+        "sigmas=" + ",".join(f"{sigma:.3f}" for sigma in selected_sigmas),
         flush=True,
     )
     print(f"target_remaining_ratio={TARGET_REMAINING_RATIO:.2f}", flush=True)
     print("fine_tuning_launched=False", flush=True)
-    identity = _verify_upstream(reference_output, checkpoint, sweep_root)
+    identity = _verify_upstream(
+        reference_output,
+        checkpoint,
+        sweep_root,
+        write_manifest=not args.read_only_upstream,
+    )
     print(
         "upstream identities verified: "
         f"checkpoint={identity['checkpoint']['sha256']} "
@@ -848,7 +880,7 @@ def main() -> None:
     model = slowfast_16x8_resnet101_kinetics400(101)
     inventory = build_inventory(model, MIN_KEEP_RATIO)
     rows = []
-    for sigma in SIGMAS:
+    for sigma in selected_sigmas:
         sigma_dir = sweep_root / _sigma_name(sigma)
         _prepare_sigma_dir(
             sigma_dir,
@@ -876,10 +908,17 @@ def main() -> None:
             f"preft_top1={row['preft_top1']:.8f} ===",
             flush=True,
         )
-    if len(rows) != len(SIGMAS):
-        raise RuntimeError("sigma sweep did not produce exactly eleven rows")
-    _write_global_outputs(sweep_root, rows)
-    print("=== Task038 sigma sweep complete: eleven sigmas ===", flush=True)
+    if len(selected_sigmas) == len(SIGMAS):
+        if len(rows) != len(SIGMAS):
+            raise RuntimeError("sigma sweep did not produce exactly eleven rows")
+        _write_global_outputs(sweep_root, rows)
+        print("=== Task038 sigma sweep complete: eleven sigmas ===", flush=True)
+    else:
+        print(
+            "=== Task038 sigma worker complete: "
+            f"{len(rows)} sigma(s); global aggregation deferred ===",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

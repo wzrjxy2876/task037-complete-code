@@ -81,3 +81,18 @@ def test_rank_and_correlation_helpers():
     assert sweep._ranks([3.0, 1.0, 2.0]) == [3.0, 1.0, 2.0]
     assert sweep._ranks([1.0, 1.0, 2.0]) == [1.5, 1.5, 3.0]
     assert sweep._pearson([1.0, 2.0, 3.0], [2.0, 4.0, 6.0]) == 1.0
+
+def test_subset_worker_support_keeps_shared_upstream_read_only():
+    source = inspect.getsource(sweep.main)
+    verify_source = inspect.getsource(sweep._verify_upstream)
+    assert "--sigmas" in source
+    assert "--read-only-upstream" in source
+    assert "write_manifest=not args.read_only_upstream" in source
+    assert "selected_sigmas" in source
+    assert "write_manifest" in verify_source
+
+
+def test_subset_worker_defers_global_aggregation():
+    source = inspect.getsource(sweep.main)
+    assert "global aggregation deferred" in source
+    assert "len(selected_sigmas) == len(SIGMAS)" in source

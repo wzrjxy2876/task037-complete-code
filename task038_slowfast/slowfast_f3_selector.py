@@ -192,10 +192,12 @@ def select_f3(
     all_vectors = aligned_cpu.to(device=preferred_device, dtype=torch.float32)
     all_valid = valid_cpu.to(device=preferred_device, dtype=torch.bool)
     all_norms = torch.linalg.norm(all_vectors, dim=1)
-    all_vectors = torch.where(
-        all_valid[:, None], all_vectors / all_norms.clamp_min(1e-12)[:, None],
-        torch.zeros_like(all_vectors)
-    )
+    # Normalize in place to avoid a second N*unit*feature allocation.  This
+    # is numerically equivalent to the previous float32 where/division path;
+    # invalid rows are exact zero in the archive and are masked explicitly.
+    all_vectors.div_(all_norms.clamp_min(1e-12)[:, None])
+    all_vectors.masked_fill_(~all_valid[:, None], 0.0)
+    del all_norms
     states: list[DomainState] = []
     for domain_id, members in enumerate(domains):
         member_tensor = torch.tensor(members, dtype=torch.long, device=preferred_device)

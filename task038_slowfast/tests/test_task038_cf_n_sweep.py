@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 
 from task038_slowfast import task038_cf_n_sweep as sweep
+from task038_slowfast import slowfast_f3_selector as selector
 
 
 def test_exact_n_grid_and_fixed_sigma():
@@ -65,6 +66,13 @@ def test_worker_uses_one_logical_cuda_device_per_isolated_process():
     assert '"CUDA_VISIBLE_DEVICES": physical_gpu' in source
     assert '"--device",' in source
     assert '"cuda:1"' not in source
+
+
+def test_selector_avoids_duplicate_full_archive_gpu_allocation():
+    source = inspect.getsource(selector.select_f3)
+    assert "all_vectors.div_(" in source
+    assert "all_vectors.masked_fill_(" in source
+    assert "del all_norms" in source
 
 
 def test_worker_has_no_finetuning_call_and_has_preft_validation():

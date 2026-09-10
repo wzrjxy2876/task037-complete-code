@@ -119,7 +119,10 @@ class ContributionFieldArchive:
             start, end = int(entry["global_start"]), int(entry["global_end"])
             array = np.load(self.root / entry["fields_path"], mmap_mode="r", allow_pickle=False)
             valid = np.load(self.root / entry["valid_path"], mmap_mode="r", allow_pickle=False)
-            block = np.asarray(array, dtype=np.float32).transpose(1, 0, 2, 3, 4).reshape(end - start, feature_dim)
+            sample_count = int(self.manifest["sample_count"])
+            if int(array.shape[0]) < sample_count:
+                raise ValueError("field archive has fewer samples than its manifest")
+            block = np.asarray(array[:sample_count], dtype=np.float32).transpose(1, 0, 2, 3, 4).reshape(end - start, feature_dim)
             aligned[start:end] = block
             valid_aligned[start:end] = np.asarray(valid, dtype=np.bool_).any(axis=0)
         aligned.flush()
@@ -162,8 +165,11 @@ class ContributionFieldArchive:
             entry = self._entry(layer_name)
             array = np.load(self.root / entry["fields_path"], mmap_mode="r")
             mask = np.load(self.root / entry["valid_path"], mmap_mode="r")
+            sample_count = int(self.manifest["sample_count"])
+            if int(array.shape[0]) < sample_count:
+                raise ValueError("field archive has fewer samples than its manifest")
             for unit in units:
-                row = np.asarray(array[:, unit.local_channel_index], dtype=np.float32)
+                row = np.asarray(array[:sample_count, unit.local_channel_index], dtype=np.float32)
                 lookup[unit.global_index] = row.reshape(-1)
         for index in order:
             unit = self.inventory.units[index]

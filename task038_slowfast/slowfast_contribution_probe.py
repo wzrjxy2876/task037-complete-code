@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import torch
@@ -33,6 +33,7 @@ def probe_contribution_fields(
     device: torch.device,
     output_dir: str | Path,
     seed: int = 3407,
+    sample_identity: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     del checkpoint
     if seed != 3407:
@@ -43,7 +44,19 @@ def probe_contribution_fields(
     field_root = out / "fields"
     field_root.mkdir(exist_ok=True)
     _, val_list, _ = data_paths()
-    identity = balanced_n9_indices(val_list, seed=seed)
+    identity = (
+        balanced_n9_indices(val_list, seed=seed)
+        if sample_identity is None
+        else [dict(row) for row in sample_identity]
+    )
+    if not identity:
+        raise ValueError("Contribution Field sample identity must not be empty")
+    required_keys = {"split", "split_index", "video_id", "label"}
+    if any(not required_keys.issubset(row) for row in identity):
+        raise ValueError("Contribution Field sample identity is incomplete")
+    if len({int(row["split_index"]) for row in identity}) != len(identity):
+        raise ValueError("Contribution Field sample identity has duplicate indices")
+    sample_count = len(identity)
     loader = build_loader(
         val_list, batch_size=1, shuffle=False,
         indices=[int(row["split_index"]) for row in identity], workers=0
@@ -79,18 +92,18 @@ def probe_contribution_fields(
             stem = layer_name.replace(".", "__")
             memmaps[layer_name] = np.lib.format.open_memmap(
                 field_root / f"{stem}.fields.npy", mode="w+", dtype=np.float32,
-                shape=(9, len(units), 16, 7, 7)
+                shape=(sample_count, len(units), 16, 7, 7)
             )
             valmaps[layer_name] = np.lib.format.open_memmap(
                 field_root / f"{stem}.valid.npy", mode="w+", dtype=np.bool_,
-                shape=(9, len(units))
+                shape=(sample_count, len(units))
             )
             entries.append(
                 {
                     "layer_name": layer_name,
                     "global_start": units[0].global_index,
                     "global_end": units[-1].global_index + 1,
-                    "shape": [9, len(units), 16, 7, 7],
+                    "shape": [sample_count, len(units), 16, 7, 7],
                     "fields_path": f"{stem}.fields.npy",
                     "valid_path": f"{stem}.valid.npy",
                     "normalization": "raw signed pooled float32; one L2 after cross-video concatenation",
@@ -142,10 +155,10 @@ def probe_contribution_fields(
             "conv3": "semantic residual block output after ReLU",
             "lateral": "lateral output before Slow concatenation",
         },
-        "sample_count": 9,
+        "sample_count": sample_count,
         "sample_identity": identity,
         "pooled_shape": [16, 7, 7],
-        "feature_dimension": 9 * 16 * 7 * 7,
+        "feature_dimension": sample_count * 16 * 7 * 7,
         "unit_count": inventory.num_units,
         "entries": entries,
         "no_per_video_normalization": True,
@@ -157,7 +170,8 @@ def probe_contribution_fields(
     (out / "field_manifest.json").write_text(text, encoding="utf-8")
     (field_root / "field_manifest.json").write_text(text, encoding="utf-8")
     identity_payload = sample_identity_payload(val_list, identity, seed)
-    (out / "n09_sample_identity.json").write_text(
+    identity_filename = "n09_sample_identity.json" if sample_count == 9 else f"n{sample_count:03d}_sample_identity.json"
+    (out / identity_filename).write_text(
         json.dumps(identity_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )

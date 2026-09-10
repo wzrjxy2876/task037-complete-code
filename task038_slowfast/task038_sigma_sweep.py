@@ -82,8 +82,8 @@ def _verify_upstream(
     descriptors_path = reference_output / "descriptors"
     contribution_path = reference_output / "contribution"
     fields_path = contribution_path / "fields"
-    field_manifest_path = fields_path / "field_manifest.json"
-    sample_identity_path = fields_path / "sample_identity.json"
+    field_manifest_path = contribution_path / "field_manifest.json"
+    sample_identity_path = contribution_path / "sample_identity.json"
 
     required = (
         preflight_path,

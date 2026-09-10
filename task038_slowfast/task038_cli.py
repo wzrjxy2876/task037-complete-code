@@ -149,8 +149,20 @@ def run(args) -> None:
         return
     if args.mode == "bms":
         descriptor = torch.load(out / "descriptors" / "descriptor_vectors.pt", map_location=device).float()
-        domains, sinks = global_bms_domains(descriptor, device)
-        _json(out / "bms" / "bms_domains.json", {"schema": "task038_global_bms_v1", "parameters": {"sigma": 0.1, "tol": 1e-4, "max_iters": 100, "sink_merge_tol": 0.01}, "unit_count": inventory.num_units, "domains": domains})
+        domains, sinks = global_bms_domains(
+            descriptor, device, sigma=args.bms_sigma
+        )
+        _json(out / "bms" / "bms_domains.json", {
+            "schema": "task038_global_bms_v1",
+            "parameters": {
+                "sigma": float(args.bms_sigma),
+                "tol": 1e-4,
+                "max_iters": 100,
+                "sink_merge_tol": 0.01,
+            },
+            "unit_count": inventory.num_units,
+            "domains": domains,
+        })
         torch.save(sinks.detach().cpu(), out / "bms" / "sink_positions.pt")
         _json(out / "bms" / "bms_summary.json", {"status": "passed", "domain_count": len(domains), "all_units_assigned_once": True, "global": True})
         return
@@ -291,6 +303,11 @@ def main():
     parser.add_argument("--output_dir", default=os.environ.get("TASK038_OUTPUT_DIR", "/data/jixinye25/work1/output/task038_slowfast_functional_coverage_migration/n09_remain50_exact"))
     parser.add_argument("--device", default=os.environ.get("TASK038_DEVICE", "cuda:0"))
     parser.add_argument("--max_steps", type=int, default=32)
+    parser.add_argument(
+        "--bms-sigma",
+        type=float,
+        default=float(os.environ.get("TASK038_BMS_SIGMA", "0.10")),
+    )
     parser.add_argument("--target-remaining-ratio", type=float, default=float(os.environ.get("TASK038_TARGET_REMAINING_RATIO", "0.50")))
     parser.add_argument("--gpu-ids", dest="gpu_ids", type=int, nargs="+", default=[0, 1])
     args = parser.parse_args()

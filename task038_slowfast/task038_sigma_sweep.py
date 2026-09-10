@@ -195,6 +195,7 @@ def _run_cli(
     checkpoint: Path,
     device: str,
     sigma: float,
+    cuda_visible_devices: str,
 ) -> None:
     if mode not in {"bms", "selection", "logical", "preft"}:
         raise ValueError(f"sweep mode is not allowed: {mode}")
@@ -222,7 +223,7 @@ def _run_cli(
             "OMP_NUM_THREADS": "2",
             "MKL_NUM_THREADS": "2",
             "OPENBLAS_NUM_THREADS": "2",
-            "CUDA_VISIBLE_DEVICES": "0,1",
+            "CUDA_VISIBLE_DEVICES": cuda_visible_devices,
             "TASK038_TARGET_REMAINING_RATIO": f"{TARGET_REMAINING_RATIO:.2f}",
         }
     )
@@ -822,6 +823,11 @@ def main() -> None:
         default="/home/jixinye25/jxy_work1/pretrained/slowfast-teacher-ucf101.ckpt",
     )
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument(
+        "--cuda-visible-devices",
+        default=os.environ.get("CUDA_VISIBLE_DEVICES", "0,1"),
+        help="physical GPU list exposed to each child process",
+    )
     parser.add_argument("--sweep-root", type=Path, default=SWEEP_ROOT)
     parser.add_argument("--reference-output", type=Path, default=REFERENCE_OUTPUT)
     parser.add_argument(
@@ -887,12 +893,12 @@ def main() -> None:
             reference_output / "descriptors",
             reference_output / "contribution",
         )
-        _run_cli("bms", sigma_dir, checkpoint, args.device, sigma)
+        _run_cli("bms", sigma_dir, checkpoint, args.device, sigma, args.cuda_visible_devices)
         bms_summary = _write_bms_products(sigma, sigma_dir, inventory)
-        _run_cli("selection", sigma_dir, checkpoint, args.device, sigma)
+        _run_cli("selection", sigma_dir, checkpoint, args.device, sigma, args.cuda_visible_devices)
         registry_info = _read_registry(sigma_dir)
-        _run_cli("logical", sigma_dir, checkpoint, args.device, sigma)
-        _run_cli("preft", sigma_dir, checkpoint, args.device, sigma)
+        _run_cli("logical", sigma_dir, checkpoint, args.device, sigma, args.cuda_visible_devices)
+        _run_cli("preft", sigma_dir, checkpoint, args.device, sigma, args.cuda_visible_devices)
         pruning = _write_pruning_diagnostics(
             sigma, sigma_dir, inventory, registry_info["registry"]
         )

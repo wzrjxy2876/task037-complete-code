@@ -96,3 +96,10 @@ def test_subset_worker_defers_global_aggregation():
     source = inspect.getsource(sweep.main)
     assert "global aggregation deferred" in source
     assert "len(selected_sigmas) == len(SIGMAS)" in source
+
+def test_workers_pin_physical_gpu_visibility():
+    source = inspect.getsource(sweep.main)
+    runner = inspect.getsource(sweep._run_cli)
+    assert "--cuda-visible-devices" in source
+    assert "cuda_visible_devices" in runner
+    assert '"CUDA_VISIBLE_DEVICES": cuda_visible_devices' in runner

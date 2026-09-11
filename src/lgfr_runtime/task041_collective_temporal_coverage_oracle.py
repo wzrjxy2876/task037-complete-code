@@ -223,21 +223,22 @@ def attach_domain_sizes(
     coverage_rows: Sequence[dict[str, Any]],
     mapping_rows: Sequence[Mapping[str, str]],
 ) -> None:
-    by_task040 = {
-        int(row["task040_unit_global_index"]): row for row in mapping_rows
-    }
+    # The D3 mapping contains the authoritative full-domain size for each
+    # frozen BMS domain, while D1 added extra tested members not present in the
+    # compact n03 mapping. Join the size by domain, not by candidate row.
+    by_domain: dict[str, int] = {}
+    for mapping in mapping_rows:
+        domain = str(mapping["domain_id"])
+        size = int(mapping["full_domain_size"])
+        previous = by_domain.get(domain)
+        if previous is not None and previous != size:
+            raise ValueError(f"inconsistent frozen size for domain {domain}")
+        by_domain[domain] = size
     for row in coverage_rows:
-        key = int(row["candidate_task040_global_index"])
-        mapping = by_task040.get(key)
-        if mapping is None:
-            raise ValueError(f"no frozen BMS mapping for Task040 unit {key}")
-        mapped_domain = str(mapping["domain_id"])
-        if mapped_domain != str(row["domain_id"]):
-            raise ValueError(
-                f"domain mismatch for Task040 unit {key}: "
-                f"{mapped_domain} != {row['domain_id']}"
-            )
-        row["full_frozen_domain_size"] = int(mapping["full_domain_size"])
+        domain = str(row["domain_id"])
+        if domain not in by_domain:
+            raise ValueError(f"no frozen BMS size for domain {domain}")
+        row["full_frozen_domain_size"] = by_domain[domain]
 
 
 def rankdata(values: Sequence[float]) -> np.ndarray:

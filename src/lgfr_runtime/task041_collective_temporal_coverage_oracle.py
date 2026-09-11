@@ -45,6 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--domain_mapping_csv", required=True)
     parser.add_argument("--pooled_summary_csv", required=True)
     parser.add_argument("--replaceability_csv", required=True)
+    parser.add_argument("--raw_records_csv", required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--val_list", default="")
     parser.add_argument("--frame_root", default="")
@@ -642,12 +643,70 @@ def build_ordering_rows(
     return output
 
 
+def derive_baselines_from_raw(
+    raw_rows: Sequence[Mapping[str, str]],
+) -> dict[int, dict[str, float]]:
+    """Reproduce the frozen Task040 pooled metrics for D1-added units.
+
+    Task040 D1 raw records contain three videos and 16 fixed-cardinality
+    interventions per span. The formulas below are the historical C-orthogonal
+    and pooled-metric definitions; they do not infer or alter BMS assignments.
+    """
+    grouped: dict[int, list[Mapping[str, str]]] = defaultdict(list)
+    for raw in raw_rows:
+        grouped[int(raw["unit_global_index"])].append(raw)
+    output: dict[int, dict[str, float]] = {}
+    for unit_id, rows in grouped.items():
+        span_values: dict[int, dict[str, float]] = {}
+        for span in SPANS:
+            selected = [row for row in rows if int(row["block_size"]) == span]
+            if not selected:
+                raise ValueError(f"raw baseline has no span {span} for unit {unit_id}")
+            a = np.asarray([float(row["z_true_original"]) for row in selected], dtype=np.float64)
+            b = np.asarray([float(row["z_true_original_masked"]) for row in selected], dtype=np.float64)
+            c = np.asarray([float(row["z_true_intervened"]) for row in selected], dtype=np.float64)
+            d = np.asarray([float(row["z_true_intervened_masked"]) for row in selected], dtype=np.float64)
+            tau = np.asarray([float(row["tau"]) for row in selected], dtype=np.float64)
+            c_struct = a - b + c - d
+            c_temp = a + b - c - d
+            c_interaction = a - b - c + d
+            ss_struct = float(np.sum(c_struct * c_struct, dtype=np.float64))
+            ss_temp = float(np.sum(c_temp * c_temp, dtype=np.float64))
+            ss_interaction = float(np.sum(c_interaction * c_interaction, dtype=np.float64))
+            total = ss_struct + ss_temp + ss_interaction
+            span_values[span] = {
+                "G_RMS": float(np.sqrt(np.mean(c_interaction * c_interaction, dtype=np.float64))),
+                "HTOR": float(np.sqrt(np.mean(tau * tau, dtype=np.float64))),
+                "PTR": float(ss_interaction / (total + np.float64(EPS))),
+            }
+        unique_videos = {}
+        for row in rows:
+            unique_videos[int(row["video_index"])] = float(row["d_original"])
+        output[unit_id] = {
+            "mean_abs_d_original": float(
+                np.mean(np.abs(np.asarray(list(unique_videos.values()), dtype=np.float64)))
+            ),
+            "G_RMS": float(
+                np.sqrt(np.mean([span_values[span]["G_RMS"] ** 2 for span in SPANS], dtype=np.float64))
+            ),
+            "HTOR": float(
+                np.sqrt(np.mean([span_values[span]["HTOR"] ** 2 for span in SPANS], dtype=np.float64))
+            ),
+            "PTR": float(
+                np.mean([span_values[span]["PTR"] for span in SPANS], dtype=np.float64)
+            ),
+        }
+    return output
+
+
 def baseline_comparison_rows(
     selected_rows: Sequence[Mapping[str, Any]],
     pooled_rows: Sequence[Mapping[str, str]],
     replaceability_rows: Sequence[Mapping[str, str]],
+    raw_rows: Sequence[Mapping[str, str]],
 ) -> list[dict[str, Any]]:
     pooled_by_key = {int(row["unit_global_index"]): row for row in pooled_rows}
+    raw_baselines = derive_baselines_from_raw(raw_rows)
     replace_by_key = {
         int(row["candidate_task037_global_index"]): row
         for row in replaceability_rows
@@ -657,13 +716,22 @@ def baseline_comparison_rows(
         task040_index = int(candidate["candidate_task040_global_index"])
         task037_index = int(candidate["candidate_task037_global_index"])
         pooled = pooled_by_key.get(task040_index)
+        derived = raw_baselines.get(task040_index)
         replace = replace_by_key.get(task037_index)
-        if pooled is None:
-            raise ValueError(f"missing pooled baseline for Task040 unit {task040_index}")
+        if pooled is None and derived is None:
+            raise ValueError(
+                f"missing pooled/raw baseline for Task040 unit {task040_index}"
+            )
         if replace is None:
             raise ValueError(
                 f"missing replaceability baseline for Task037 unit {task037_index}"
             )
+        baseline = derived if pooled is None else {
+            "mean_abs_d_original": float(pooled["mean_abs_d_original"]),
+            "G_RMS": float(pooled["G_RMS"]),
+            "HTOR": float(pooled["HTOR"]),
+            "PTR": float(pooled["PTR"]),
+        }
         output.append(
             {
                 "domain_id": candidate["domain_id"],
@@ -673,17 +741,17 @@ def baseline_comparison_rows(
                 "layer_name": candidate["candidate_layer_name"],
                 "unit_type": candidate["candidate_unit_type"],
                 "unit_index": candidate["candidate_unit_index"],
-                "mean_abs_d_original": float(pooled["mean_abs_d_original"]),
-                "G_RMS": float(pooled["G_RMS"]),
-                "old_HTOR": float(pooled["HTOR"]),
-                "PTR": float(pooled["PTR"]),
+                "mean_abs_d_original": baseline["mean_abs_d_original"],
+                "G_RMS": baseline["G_RMS"],
+                "old_HTOR": baseline["HTOR"],
+                "PTR": baseline["PTR"],
                 "corrected_pairwise_best_E": float(replace["best_E"]),
                 "R_MCTC": float(candidate["R_MCTC"]),
                 "coverage_risk": float(candidate["coverage_risk"]),
+                "baseline_source": "task040_n03_pooled" if pooled is not None else "task040_d1_raw_reproduced",
             }
         )
     return output
-
 
 def mixed_domain_rows(
     selected_rows: Sequence[Mapping[str, Any]],
@@ -908,7 +976,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     enriched_masking = add_mask_metrics(coverage_by_key, masking_rows)
     ordering_rows = build_ordering_rows(selected_rows, enriched_masking)
     baseline_rows = baseline_comparison_rows(
-        selected_rows, read_csv(pooled_csv), read_csv(replace_csv)
+        selected_rows,
+        read_csv(pooled_csv),
+        read_csv(replace_csv),
+        read_csv(Path(args.raw_records_csv).expanduser().resolve()),
     )
     mixed_rows = mixed_domain_rows(selected_rows, enriched_masking)
     rank_stats = domain_rank_analysis(enriched_masking)

@@ -6,6 +6,7 @@ import torch
 
 from task040_htor_core import (
     apply_temporal_intervention,
+    apply_temporal_interventions,
     compute_htor,
     compute_level_rms,
     compute_tau,
@@ -62,8 +63,29 @@ class TestTask040Core(unittest.TestCase):
             enumerate_hierarchical_interventions(16),
         )
 
+    def test_batched_temporal_interventions_match_single_path(self) -> None:
+        for temporal_length in (8, 32):
+            clip = torch.arange(3 * temporal_length * 2 * 2, dtype=torch.float32).reshape(
+                3, temporal_length, 2, 2
+            )
+            specs = enumerate_hierarchical_interventions(temporal_length)
+            selected = specs[: min(5, len(specs))]
+            batched = apply_temporal_interventions(clip, selected, time_dim=1)
+            self.assertEqual(
+                tuple(batched.shape),
+                (len(selected), 3, temporal_length, 2, 2),
+            )
+            self.assertEqual(batched.dtype, clip.dtype)
+            self.assertEqual(batched.device, clip.device)
+            for index, spec in enumerate(selected):
+                self.assertTrue(
+                    torch.equal(
+                        batched[index],
+                        apply_temporal_intervention(clip, spec, time_dim=1),
+                    )
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
-
 

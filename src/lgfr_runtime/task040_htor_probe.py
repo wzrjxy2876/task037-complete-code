@@ -689,7 +689,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
         "no_finetuning": True,
         "no_contribution_field": True,
         "mask_restore_exact": mask_restore_exact,
-        "stage_status": {"A": "PASS", "B": "PASS", "C": "PASS", "D": "PASS"},
+        "stage_status": {
+            "A": "PASS",
+            "B": "PASS",
+            "C": "PASS",
+            "D": "COMPLETED_UNJUDGED",
+        },
         "runtime_arguments": runtime_arguments,
     }
     write_json(output_dir / "task040_summary.json", summary)

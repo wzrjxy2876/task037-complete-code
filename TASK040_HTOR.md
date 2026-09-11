@@ -94,4 +94,7 @@ The identity report records checkpoint SHA256, compatible/missing/unexpected
 keys, classifier-head status, model parameter counts, and discovered head/FFN
 unit counts before the HTOR records are produced.
 
+Stage D is reported as `COMPLETED_UNJUDGED`; reaching the end of the probe is
+not a scientific pass. Its interpretation requires inspecting the real HTOR
+distributions after the diagnostic run.
 

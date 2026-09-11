@@ -224,7 +224,7 @@ def attach_domain_sizes(
     mapping_rows: Sequence[Mapping[str, str]],
 ) -> None:
     by_task040 = {
-        int(row["unit_global_index"]): row for row in mapping_rows
+        int(row["task040_unit_global_index"]): row for row in mapping_rows
     }
     for row in coverage_rows:
         key = int(row["candidate_task040_global_index"])

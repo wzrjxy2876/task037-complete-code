@@ -60,6 +60,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--units_per_layer", type=int, default=3)
     parser.add_argument("--intervention_batch_size", type=int, default=2)
     parser.add_argument("--eps", type=float, default=1e-12)
+    parser.add_argument(
+        "--intervention_mode",
+        choices=("hierarchical", "fixed_cardinality_span"),
+        default="hierarchical",
+        help="Task040 temporal intervention design; hierarchical remains the default",
+    )
     return parser.parse_args()
 
 
@@ -500,19 +506,45 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
     first_videos = first_batch[0].float().to(device, non_blocking=True)
     first_label = int(first_batch[1][0].item())
     actual_t = infer_temporal_length(first_videos)
-    interventions = core.enumerate_hierarchical_interventions(actual_t)
+    if args.intervention_mode == "fixed_cardinality_span":
+        interventions = core.enumerate_fixed_cardinality_temporal_pairs(actual_t)
+        expected_levels = actual_t.bit_length() - 1
+        expected_per_level = actual_t // 2
+        if len(interventions) != expected_levels * expected_per_level:
+            raise AssertionError("fixed-cardinality intervention count mismatch")
+        for level in range(expected_levels):
+            level_items = [item for item in interventions if item.level == level]
+            if len(level_items) != expected_per_level:
+                raise AssertionError("fixed-cardinality span level count mismatch")
+            if any(item.block_size != (1 << level) for item in level_items):
+                raise AssertionError("fixed-cardinality span value mismatch")
+            if any(item.right_start - item.left_start != (1 << level) for item in level_items):
+                raise AssertionError("fixed-cardinality temporal distance mismatch")
+    else:
+        interventions = core.enumerate_hierarchical_interventions(actual_t)
     core.verify_intervention_identity(interventions, actual_t)
     identity["baseline_model_sanity"] = {
         "output_shape": list(unwrap_logits(model(first_videos)).shape),
         "actual_T": actual_t,
         "first_label": first_label,
         "finite": True,
+        "intervention_mode": args.intervention_mode,
+        "num_interventions": len(interventions),
+        "interventions_per_level": {
+            str(level): sum(item.level == level for item in interventions)
+            for level in sorted({item.level for item in interventions})
+        },
     }
     write_json(output_dir / "task040_checkpoint_identity.json", identity)
 
     manifest = {
         "task": "task040",
-        "method": "HTOR",
+        "method": (
+            "Task040_fixed_cardinality_span_diagnostic"
+            if args.intervention_mode == "fixed_cardinality_span"
+            else "HTOR"
+        ),
+        "intervention_mode": args.intervention_mode,
         "actual_T": actual_t,
         "time_dim_for_model_input": 2,
         "index_base": 0,
@@ -669,7 +701,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
     ]
     summary = {
         "task": "task040",
-        "method": "HTOR",
+        "method": (
+            "Task040_fixed_cardinality_span_diagnostic"
+            if args.intervention_mode == "fixed_cardinality_span"
+            else "HTOR"
+        ),
+        "intervention_mode": args.intervention_mode,
         "seed": int(args.seed),
         "num_classes": int(args.num_classes),
         "videos_per_class": int(args.videos_per_class),

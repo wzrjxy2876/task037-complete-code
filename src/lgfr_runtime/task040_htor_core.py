@@ -101,6 +101,58 @@ def enumerate_hierarchical_interventions(
     return interventions
 
 
+
+def enumerate_fixed_cardinality_temporal_pairs(
+    temporal_length: int,
+) -> list[TemporalIntervention]:
+    """Enumerate fixed-cardinality frame pairs at dyadic temporal spans.
+
+    At every span, each sampled frame occurs in exactly one pair and every
+    intervention swaps exactly two temporal positions.  The old hierarchical
+    block-swap enumerator is intentionally left unchanged.
+    """
+    t = validate_temporal_length(temporal_length)
+    interventions: list[TemporalIntervention] = []
+    for level in range(t.bit_length() - 1):
+        span = 1 << level
+        pair_index = 0
+        for q in range(t // (2 * span)):
+            base = 2 * q * span
+            for r in range(span):
+                left = base + r
+                right = left + span
+                permutation = list(range(t))
+                permutation[left], permutation[right] = (
+                    permutation[right],
+                    permutation[left],
+                )
+                interventions.append(
+                    TemporalIntervention(
+                        temporal_length=t,
+                        level=level,
+                        block_size=span,
+                        pair_index=pair_index,
+                        left_start=left,
+                        left_end=left + 1,
+                        right_start=right,
+                        right_end=right + 1,
+                        permutation=tuple(permutation),
+                    )
+                )
+                pair_index += 1
+        if pair_index != t // 2:
+            raise AssertionError(
+                "fixed-cardinality span must contain T/2 pairs at every level"
+            )
+    expected = (t // 2) * (t.bit_length() - 1)
+    if len(interventions) != expected:
+        raise AssertionError(
+            "fixed-cardinality span intervention count must equal "
+            "(T/2)*log2(T)"
+        )
+    return interventions
+
+
 def apply_temporal_intervention(
     x: torch.Tensor,
     intervention: TemporalIntervention,

@@ -11,6 +11,7 @@ from task040_htor_core import (
     compute_level_rms,
     compute_tau,
     enumerate_hierarchical_interventions,
+    enumerate_fixed_cardinality_temporal_pairs,
     validate_temporal_length,
     verify_intervention_identity,
 )
@@ -38,6 +39,64 @@ class TestTask040Core(unittest.TestCase):
         transformed = apply_temporal_intervention(clip, level_one, time_dim=0)
         self.assertEqual(transformed.tolist(), [2, 3, 0, 1, 4, 5, 6, 7])
         self.assertEqual(sorted(transformed.tolist()), list(range(8)))
+
+    def test_fixed_cardinality_span_properties(self) -> None:
+        for temporal_length in (8, 16, 32):
+            with self.subTest(temporal_length=temporal_length):
+                specs = enumerate_fixed_cardinality_temporal_pairs(temporal_length)
+                levels = temporal_length.bit_length() - 1
+                self.assertEqual(len(specs), (temporal_length // 2) * levels)
+                self.assertEqual(
+                    len({spec.level for spec in specs}),
+                    levels,
+                )
+                self.assertEqual(
+                    specs,
+                    enumerate_fixed_cardinality_temporal_pairs(temporal_length),
+                )
+                for level in range(levels):
+                    span = 1 << level
+                    level_specs = [spec for spec in specs if spec.level == level]
+                    self.assertEqual(len(level_specs), temporal_length // 2)
+                    pairs = {(spec.left_start, spec.right_start) for spec in level_specs}
+                    self.assertEqual(len(pairs), temporal_length // 2)
+                    self.assertEqual(
+                        sorted(index for pair in pairs for index in pair),
+                        list(range(temporal_length)),
+                    )
+                    self.assertTrue(
+                        all(
+                            spec.right_start - spec.left_start == span
+                            and spec.left_end == spec.left_start + 1
+                            and spec.right_end == spec.right_start + 1
+                            for spec in level_specs
+                        )
+                    )
+                    clip = torch.arange(temporal_length)
+                    for spec in level_specs:
+                        transformed = apply_temporal_intervention(
+                            clip, spec, time_dim=0
+                        )
+                        changed = (transformed != clip).nonzero().flatten().tolist()
+                        self.assertEqual(len(changed), 2)
+                        self.assertEqual(sorted(transformed.tolist()), list(range(temporal_length)))
+
+    def test_fixed_cardinality_batched_path_matches_single_path(self) -> None:
+        for temporal_length in (8, 16, 32):
+            with self.subTest(temporal_length=temporal_length):
+                clip = torch.arange(2 * temporal_length * 2).reshape(
+                    2, temporal_length, 2
+                )
+                specs = enumerate_fixed_cardinality_temporal_pairs(temporal_length)
+                batched = apply_temporal_interventions(clip, specs, time_dim=1)
+                self.assertEqual(tuple(batched.shape), (len(specs), 2, temporal_length, 2))
+                for index, spec in enumerate(specs):
+                    self.assertTrue(
+                        torch.equal(
+                            batched[index],
+                            apply_temporal_intervention(clip, spec, time_dim=1),
+                        )
+                    )
 
     def test_tau_formula_and_range(self) -> None:
         self.assertEqual(compute_tau(1.0, 1.0).item(), 0.0)

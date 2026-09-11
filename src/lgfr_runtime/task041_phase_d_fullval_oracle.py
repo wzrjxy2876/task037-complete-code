@@ -1091,9 +1091,17 @@ def build_domain_ordering(
             "low_unit_type": low["candidate_unit_type"],
             "high_unit_type": high["candidate_unit_type"],
         }
+        damage_field_by_metric = {
+            "true_class_logit_drop": "mean_true_class_logit_drop",
+            "cross_entropy_increase": "mean_cross_entropy_increase",
+            "prediction_flip_rate": "prediction_flip_rate",
+            "top1_accuracy_change": "top1_accuracy_change",
+            "top5_accuracy_change": "top5_accuracy_change",
+        }
         for metric in METRIC_NAMES:
-            low_value = float(low[metric])
-            high_value = float(high[metric])
+            damage_field = damage_field_by_metric[metric]
+            low_value = float(low[damage_field])
+            high_value = float(high[damage_field])
             row[f"low_{metric}"] = low_value
             row[f"high_{metric}"] = high_value
             row[f"high_minus_low_{metric}"] = high_value - low_value

@@ -17,6 +17,7 @@ import json
 import math
 import random
 import sys
+from dataclasses import asdict
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -804,11 +805,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     mapping_csv = Path(args.domain_mapping_csv).expanduser().resolve()
     pooled_csv = Path(args.pooled_summary_csv).expanduser().resolve()
     replace_csv = Path(args.replaceability_csv).expanduser().resolve()
+    raw_csv = Path(args.raw_records_csv).expanduser().resolve()
     if args.batch_size <= 0 or args.num_workers < 0:
         raise ValueError("invalid loader configuration")
     if not checkpoint.is_file():
         raise FileNotFoundError(checkpoint)
-    for path in (profiles_csv, mapping_csv, pooled_csv, replace_csv):
+    for path in (profiles_csv, mapping_csv, pooled_csv, replace_csv, raw_csv):
         if not path.is_file():
             raise FileNotFoundError(path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -883,6 +885,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if len(interventions) != 80:
         raise AssertionError("Task041 requires 80 fixed-cardinality interventions")
     core.verify_intervention_identity(interventions, actual_t)
+    write_json(
+        output_dir / "task041_intervention_manifest.json",
+        {
+            "task": "task041",
+            "source": "task040_htor_core.enumerate_fixed_cardinality_temporal_pairs",
+            "actual_T": actual_t,
+            "spans": list(SPANS),
+            "pairs_per_span": actual_t // 2,
+            "num_interventions": len(interventions),
+            "two_frame_swap": True,
+            "interventions": [asdict(item) for item in interventions],
+        },
+    )
     identity["baseline_model_sanity"] = {
         "actual_T": actual_t,
         "num_videos": len(baseline),
@@ -979,7 +994,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         selected_rows,
         read_csv(pooled_csv),
         read_csv(replace_csv),
-        read_csv(Path(args.raw_records_csv).expanduser().resolve()),
+        read_csv(raw_csv),
     )
     mixed_rows = mixed_domain_rows(selected_rows, enriched_masking)
     rank_stats = domain_rank_analysis(enriched_masking)
@@ -1035,6 +1050,26 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "sqrt(mean_s delta_i(s)^2), delta_i(s)=(M_G(s)-"
             "M_G_minus_i(s))/(M_G(s)+eps), float64, no clipping or normalization"
         ),
+        "candidate_selection": {
+            "primary_selector": "R_MCTC within each frozen BMS domain",
+            "tie_break": "ascending Task037 global index",
+            "non_selectors": [
+                "mean_abs_d_original",
+                "G_RMS",
+                "old_HTOR",
+                "PTR",
+                "corrected_pairwise_best_E",
+                "Contribution Field",
+                "F3",
+            ],
+        },
+        "input_artifacts": {
+            "profiles_csv": str(profiles_csv),
+            "domain_mapping_csv": str(mapping_csv),
+            "pooled_summary_csv": str(pooled_csv),
+            "replaceability_csv": str(replace_csv),
+            "raw_records_csv": str(raw_csv),
+        },
         "coverage_formula": {
             "M_G": "max_j g_j(s)",
             "M_G_minus_i": "max_{j != i} g_j(s)",

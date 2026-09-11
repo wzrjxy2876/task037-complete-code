@@ -376,7 +376,7 @@ def video_manifest_rows(loader: DataLoader, selected_indices: Sequence[int]) -> 
         dataset = dataset.dataset
     rows = []
     for order, index in enumerate(selected_indices):
-        directory, duration, label = dataset.dataset.clips[int(index)]
+        directory, duration, label = dataset.clips[int(index)]
         rows.append(
             {
                 "video_index": order,

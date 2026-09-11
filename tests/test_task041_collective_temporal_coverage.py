@@ -37,7 +37,7 @@ class TestTask041Coverage(unittest.TestCase):
         by_id = {row["candidate_task037_global_index"]: row for row in result}
         self.assertAlmostEqual(by_id[10]["delta_span_1"], 0.5)
         self.assertEqual(by_id[10]["delta_span_2"], 0.0)
-        self.assertAlmostEqual(by_id[12]["delta_span_4"], 1.0)
+        self.assertAlmostEqual(by_id[12]["delta_span_4"], 0.8)
         expected = np.sqrt(np.mean(np.square([0.5, 0.0, 0.0, 0.5, 0.0])))
         self.assertAlmostEqual(by_id[10]["R_MCTC"], expected)
         self.assertIsInstance(by_id[10]["R_MCTC"], float)

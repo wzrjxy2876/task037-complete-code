@@ -344,6 +344,15 @@ def candidate_expressions(frozen: Mapping[str, Mapping[str, Any]]) -> list[str]:
             for _, item in sorted(frozen.items(), key=lambda pair: int(pair[0]))]
 
 
+def frozen_by_task040_index(frozen: Mapping[str, Mapping[str, Any]]) -> dict[str, tuple[str, Mapping[str, Any]]]:
+    result = {}
+    for task037_uid, item in frozen.items():
+        task040_uid = str(norm_int(item["candidate_task040_global_index"]))
+        require(task040_uid not in result, "duplicate Task040 global index in frozen identities")
+        result[task040_uid] = (str(task037_uid), item)
+    return result
+
+
 def load_model_and_units(project_root: Path, checkpoint: Path, device: Any,
                          frozen: Mapping[str, Mapping[str, Any]]) -> tuple[Any, Any, Any, dict[str, Any]]:
     import task040_htor_probe as probe
@@ -370,14 +379,21 @@ def load_model_and_units(project_root: Path, checkpoint: Path, device: Any,
             "pruning-unit discovery differs from Task040 Phase B")
     selected = probe.select_units(specs, ".*", candidate_expressions(frozen), 1, ctfrs)
     require(len(selected) == N_UNITS, "Task040 explicit unit discovery did not return 29 units")
+    task040_to_task037 = frozen_by_task040_index(frozen)
+    selected_task037 = set()
     for unit in selected:
-        uid = str(unit.global_index)
-        require(uid in frozen, "Task040 selected a unit outside the frozen Task041 identity set")
-        item = frozen[uid]
-        observed = (str(unit.layer_name), str(unit.unit_type), str(unit.unit_index), str(unit.spec.stage))
-        expected = (str(item["candidate_layer_name"]), str(item["candidate_unit_type"]),
-                    str(item["candidate_unit_index"]), str(item["candidate_stage"]))
-        require(observed == expected, "Task040 global index/layer/type/unit/stage mismatch for " + uid)
+        task040_uid = str(unit.global_index)
+        require(task040_uid in task040_to_task037,
+                "Task040 selected a unit outside the frozen Task041 identity set")
+        task037_uid, item = task040_to_task037[task040_uid]
+        observed = (str(unit.global_index), str(unit.layer_name), str(unit.unit_type),
+                    str(unit.unit_index), str(unit.spec.stage))
+        expected = (str(item["candidate_task040_global_index"]), str(item["candidate_layer_name"]),
+                    str(item["candidate_unit_type"]), str(item["candidate_unit_index"]),
+                    str(item["candidate_stage"]))
+        require(observed == expected, "Task040/Task037 global index/layer/type/unit/stage mismatch for " + task037_uid)
+        selected_task037.add(task037_uid)
+    require(selected_task037 == set(frozen), "Task040 selector did not reproduce all frozen Task037 identities")
     require({unit.unit_type for unit in selected} == {"head", "neuron"},
             "frozen selection must contain both attention heads and FFN neurons")
     return probe, ctfrs, model, identity
@@ -510,8 +526,9 @@ def worker(args: argparse.Namespace) -> None:
                         group_refs.append(intervention)
                     intervention_batches.append((group_refs, values))
             require(len(c_by_intervention) == 80, "unmasked intervention cache is incomplete")
+            task040_to_task037 = frozen_by_task040_index(frozen)
             for unit in tqdm(selected, total=N_UNITS, desc=base[-28:], leave=False, ncols=100):
-                uid, identity_row = str(unit.global_index), frozen[str(unit.global_index)]
+                uid, identity_row = task040_to_task037[str(unit.global_index)]
                 with torch.inference_mode():
                     with probe.temporary_unit_mask(unit.spec, unit.unit_index):
                         masked_logits = probe.unwrap_logits(model(videos))

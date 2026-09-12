@@ -11,7 +11,7 @@ This is an offline, CPU-only audit on the existing 29 Task041 units. It leaves t
 - The authoritative restoration column is `mask_restored_exact`; it must be explicitly `true`. `mask_restored_exactly` is accepted only as a schema alias, and all supplied aliases must agree as true.
 - Task041 task041_baseline_comparison.csv for the existing 18 low/high baseline cohort.
 
-The runner verifies that Phase C and D.1 form a disjoint partition of the frozen 29 identities, and that the full-validation damage joins exactly. Phase C's reconstructed a-b-c+d is checked against stored C_interaction.
+The runner verifies that Phase C and D.1 form a disjoint partition of the frozen 29 identities, and that the full-validation damage joins exactly. The historical D.1 raw CSV omits `stage`; those rows are joined by the exact Task040 index/layer/type/unit-index identity only when that key is unique in the frozen table, and the stage value remains sourced from the frozen table. Phase C's reconstructed a-b-c+d is checked against stored C_interaction.
 
 ## Method
 

@@ -43,6 +43,18 @@ class RankStatisticTests(unittest.TestCase):
         )
         self.assertIsNone(phase_h.spearman([1, 1], [2, 3]))
 
+    def test_historical_baseline_missingness_is_not_imputed(self):
+        row = phase_h._baseline_domain_row(
+            "269", ["1", "2", "3"],
+            {"1": 0.1, "2": 0.2, "3": None},
+            {"1": 0.3, "2": 0.2, "3": -0.1},
+            "frozen_metric",
+        )
+        self.assertEqual(row["unit_count"], 2)
+        self.assertEqual(row["missing_baseline_count"], 1)
+        self.assertAlmostEqual(row["spearman"], -1.0)
+        self.assertEqual(row["low_high_ordering"], "reverse")
+
 
 class FrozenSubsetTests(unittest.TestCase):
     def test_all_27_class_balanced_n6_subsets(self):

@@ -81,3 +81,7 @@ The ten outputs are the temporal CE raw records, per-unit win rates, per-span wi
 original-versus-temporal comparison, same-type oracle, mixed-domain description, subset stability,
 frozen-baseline comparison, machine-readable summary, and report. Stop after Phase H; no follow-on
 pruning or training is authorized by this phase.
+
+Some historical Phase-F baseline columns are blank for units outside their original baseline set.
+Those cells remain missing; baseline comparisons use only the recorded values (and report their
+unit/domain counts). No historical score is imputed, inferred, or regenerated.

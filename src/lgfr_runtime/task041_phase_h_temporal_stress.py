@@ -419,10 +419,14 @@ def prepare(args: argparse.Namespace) -> None:
                                                   "Phase-G full-validation CE"),
                              rel_tol=0.0, abs_tol=1e-12),
                 "Phase-D/G full-validation CE mismatch for " + uid)
-        baseline_scores = {
-            name: finite_float(frow[column], "baseline " + name)
-            for name, column in BASELINE_FIELDS.items()
-        }
+        baseline_scores = {}
+        for name, column in BASELINE_FIELDS.items():
+            raw_score = str(frow.get(column, "")).strip()
+            # Phase F deliberately has no frozen baseline value for 11/29
+            # units. Preserve those missing values; never impute or recompute.
+            baseline_scores[name] = (
+                None if not raw_score else finite_float(raw_score, "baseline " + name)
+            )
         units.append({
             **identity,
             "fullval_mean_cross_entropy_increase": damage,
@@ -930,6 +934,34 @@ def _row_score(domain: str, members: Sequence[str], scores: Mapping[str, float],
     }
 
 
+def _baseline_domain_row(domain: str, members: Sequence[str],
+                         scores: Mapping[str, float | None],
+                         damage: Mapping[str, float], method: str) -> dict[str, Any]:
+    """Compare a frozen baseline only where it was already recorded."""
+    available = [uid for uid in members if scores.get(uid) is not None]
+    if len(available) < 2:
+        return {
+            "row_type": "domain", "domain_id": domain,
+            "scope": "same_type" if domain in SAME_TYPE else "mixed",
+            "method": method, "unit_count": len(available),
+            "missing_baseline_count": len(members) - len(available),
+            "spearman": None, "kendall_tau_b": None,
+            "safest_candidate_task037_global_index": None,
+            "fullval_safest_task037_global_index": fullval_safest_uid(
+                {uid: damage[uid] for uid in members}),
+            "safest_identity_match": None,
+            "low_risk_task037_global_index": None,
+            "high_risk_task037_global_index": None,
+            "low_risk_fullval_ce": None, "high_risk_fullval_ce": None,
+            "high_minus_low_fullval_ce": None, "low_high_ordering": "unavailable",
+        }
+    return {
+        **_row_score(domain, available,
+                     {uid: float(scores[uid]) for uid in available}, damage, method),
+        "missing_baseline_count": len(members) - len(available),
+    }
+
+
 def _identity(row: Mapping[str, Any]) -> dict[str, Any]:
     return {key: row[key] for key in (
         "candidate_task037_global_index", "candidate_task040_global_index",
@@ -1305,14 +1337,14 @@ def finalize(args: argparse.Namespace) -> None:
 
     # Frozen baselines retain their original values and are compared only to
     # the same existing full-validation CE oracle, within each BMS domain.
-    score_maps: dict[str, dict[str, float]] = {
+    score_maps: dict[str, dict[str, float | None]] = {
         "R_original": original_risk,
         "R_temporal": {uid: 1.0 - W_temporal[uid] for uid in uids},
         "R_BCTR_N9": {uid: float(config_units[uid]["R_BCTR_N9"]) for uid in uids},
     }
     for criterion, _field in BASELINE_FIELDS.items():
         score_maps[criterion] = {
-            uid: float(config_units[uid]["baseline_scores"][criterion]) for uid in uids
+            uid: config_units[uid]["baseline_scores"][criterion] for uid in uids
         }
     baseline_rows = []
     for scope, selected_domains in (("same_type", SAME_TYPE), ("mixed", MIXED)):
@@ -1320,13 +1352,14 @@ def finalize(args: argparse.Namespace) -> None:
             group = []
             for domain in selected_domains:
                 members = [uid for uid in uids if domains[uid] == domain]
-                row = _row_score(domain, members,
-                                 {uid: scores[uid] for uid in members},
-                                 {uid: fullval[uid] for uid in members},
-                                 criterion)
+                row = _baseline_domain_row(
+                    domain, members, scores,
+                    {uid: fullval[uid] for uid in members}, criterion,
+                )
                 row["scope"] = scope
-                group.append(row)
                 baseline_rows.append(row)
+                if row["spearman"] is not None:
+                    group.append(row)
             baseline_rows.append({
                 "row_type": "domain_balanced", "scope": scope,
                 "domain_id": "ALL", "method": criterion,
@@ -1340,6 +1373,7 @@ def finalize(args: argparse.Namespace) -> None:
                 "low_high_reverse": sum(row["low_high_ordering"] == "reverse" for row in group),
                 "low_high_tie": sum(row["low_high_ordering"] == "tie" for row in group),
                 "domain_count": len(selected_domains),
+                "valid_domain_count": len(group),
             })
 
     subset_summary = {}
@@ -1573,13 +1607,14 @@ def _report(summary: Mapping[str, Any],
         "All historical criteria were compared within frozen domains against the same existing full-validation CE "
         "oracle. No baseline was modified.",
         "",
-        "| Criterion | scope | mean Spearman | mean Kendall | safest accuracy |",
-        "|---|---|---:|---:|---:|",
+        "| Criterion | scope | units / valid domains | mean Spearman | mean Kendall | safest accuracy |",
+        "|---|---|---:|---:|---:|---:|",
     ])
     for row in baseline_rows:
         if row.get("row_type") == "domain_balanced":
-            lines.append("| %s | %s | %s | %s | %s |" % (
-                row.get("method"), row.get("scope"), row.get("spearman"),
+            lines.append("| %s | %s | %s / %s | %s | %s | %s |" % (
+                row.get("method"), row.get("scope"), row.get("unit_count"),
+                row.get("valid_domain_count"), row.get("spearman"),
                 row.get("kendall_tau_b"), row.get("safest_identity_accuracy")))
     lines.extend([
         "",

@@ -668,9 +668,23 @@ def make_report(path: Path, summary: Mapping[str, Any], units: Sequence[Mapping[
                      " | " + str(r["candidate_unit_type"]) + " " + str(r["candidate_unit_index"]) +
                      " | " + format(float(r["R_MCTC"]), ".4f") + " | " + " | ".join(vectors) +
                      " | " + " | ".join(format(float(r[f]), ".4f") for f in DAMAGE) + " |")
+    special_pairs = [p for p in pairs if str(p["domain_id"]) in ("102", "103", "113", "269")]
+    lines += ["", "### Paired direction check for the frozen full-validation reversals"]
+    for p in special_pairs:
+        lines.append(
+            "- Domain " + str(p["domain_id"]) +
+            ": high-minus-low sign-balance=" + format(float(p["mean_sign_balance_high_minus_low"]), "+.4f") +
+            ", cancellation-ratio=" + format(float(p["cancellation_ratio_high_minus_low"]), "+.4f") +
+            ", RMS-norm=" + format(float(p["RMS_norm_high_minus_low"]), "+.4f") + "."
+        )
+    lower_balance_special = sum(float(p["mean_sign_balance_high_minus_low"]) < 0 for p in special_pairs)
+    lower_ratio_special = sum(float(p["cancellation_ratio_high_minus_low"]) < 0 for p in special_pairs)
+    lines.append(
+        "Among these four pairs, the high-R_MCTC unit has lower sign-balance in " +
+        str(lower_balance_special) + "/4 and a lower cancellation ratio in " +
+        str(lower_ratio_special) + "/4. This is at most a partial sign-loss explanation, not causal evidence."
+    )
     lines += [
-        "",
-        "The observed signed/RMS contrasts can make discarded sign information a plausible explanation only where unit-level patterns align with the frozen reversal. They do not establish causality.",
         "",
         "## Mixed domains 271 / 297 (separate descriptive audit; not selector validation)",
         "",
@@ -684,6 +698,25 @@ def make_report(path: Path, summary: Mapping[str, Any], units: Sequence[Mapping[
                          " | " + " | ".join(format(float(r[k]), ".4f") for k in
                             ("R_MCTC", "mean_sign_balance", "cancellation_ratio", "signed_profile_norm",
                              "RMS_profile_norm", *DAMAGE)) + " |")
+    mixed_by_type = {str(r["group"]): r for r in groups["mixed_domain_by_unit_type"]}
+    lines += ["", "### Mixed-domain type/magnitude comparison (descriptive only)"]
+    for domain in MIXED_DOMAINS:
+        head = mixed_by_type.get(domain + ":head")
+        neuron = mixed_by_type.get(domain + ":neuron")
+        if head is not None and neuron is not None:
+            lines.append(
+                "- Domain " + domain + ": head n=" + str(head["unit_count"]) +
+                " vs neuron n=" + str(neuron["unit_count"]) +
+                "; mean sign-balance " + format(float(head["mean_mean_sign_balance"]), ".3f") +
+                " vs " + format(float(neuron["mean_mean_sign_balance"]), ".3f") +
+                "; signed norm " + format(float(head["mean_signed_profile_norm"]), ".4f") +
+                " vs " + format(float(neuron["mean_signed_profile_norm"]), ".4f") +
+                "; RMS norm " + format(float(head["mean_RMS_profile_norm"]), ".4f") +
+                " vs " + format(float(neuron["mean_RMS_profile_norm"]), ".4f") + "."
+            )
+    lines.append(
+        "These contrasts show type/magnitude differences in the mixed domains; their apparent ordering success is not selector validation."
+    )
     lines += [
         "",
         "## Baseline flip-rate comparison (frozen 18 low/high candidates)",
@@ -696,13 +729,82 @@ def make_report(path: Path, summary: Mapping[str, Any], units: Sequence[Mapping[
                      " | " + str(r["ordering_incorrect_count"]) + " | " + str(r["ordering_tie_count"]) +
                      " | " + str(r["domain_balanced_spearman"]) + " | " +
                      str(r["domain_balanced_kendall_tau_b"]) + " |")
+    same_by = {(str(r["diagnostic"]), str(r["damage_metric"])): r for r in same}
+    baseline_by = {str(r["criterion"]): r for r in baseline}
+    type_by = {str(r["group"]): r for r in groups["by_unit_type"]}
+    same_type_pairs = [p for p in pairs if str(p["domain_id"]) in SAME_TYPE_DOMAINS]
+
+    def rho(diagnostic: str, outcome: str) -> str:
+        value = same_by[(diagnostic, outcome)].get("spearman")
+        return "NA" if value is None else format(float(value), "+.3f")
+
+    head = type_by["head"]
+    neuron = type_by["neuron"]
+    high_rms_pairs = sum(float(p["RMS_norm_high_minus_low"]) > 0 for p in same_type_pairs)
+    high_less_balance = sum(float(p["mean_sign_balance_high_minus_low"]) < 0 for p in same_type_pairs)
+    high_less_ratio = sum(float(p["cancellation_ratio_high_minus_low"]) < 0 for p in same_type_pairs)
+
+    def baseline_text(key: str) -> str:
+        r = baseline_by[key]
+        return (key + ": " + str(r["ordering_correct_count"]) + "/" +
+                str(r["domain_count"]) + " correct, " + str(r["ordering_incorrect_count"]) +
+                " incorrect, " + str(r["ordering_tie_count"]) + " tie; rho=" +
+                format(float(r["domain_balanced_spearman"]), ".3f") + ", tau-b=" +
+                format(float(r["domain_balanced_kendall_tau_b"]), ".3f"))
+
     lines += [
         "",
         "## Answers A–G",
         "",
-        "A/B/C/D/E are read from the signed-cancellation distributions, descriptive type strata, same-type correlations and paired reversals above. The association evidence is descriptive (29 units; seven same-type domains) and must not be interpreted causally.",
+        "**A. Yes.** Mean unit sign-balance is " +
+        format(float(summary["cancellation"]["mean_sign_balance_mean"]), ".3f") +
+        " (median " + format(float(summary["cancellation"]["mean_sign_balance_median"]), ".3f") +
+        "), and mean cancellation ratio is " +
+        format(float(summary["cancellation"]["cancellation_ratio_mean"]), ".3f") +
+        "; RMS therefore hides substantial directional cancellation in these records.",
         "",
-        "All eight Phase E artifacts are newly written in the Phase E directory. Previous Task040/Task041 outputs are inputs only and were not overwritten.",
+        "**B. Not clearly systematic.** Heads (n=" + str(head["unit_count"]) +
+        ") have mean sign-balance " + format(float(head["mean_mean_sign_balance"]), ".3f") +
+        " and cancellation ratio " + format(float(head["mean_cancellation_ratio"]), ".3f") +
+        "; FFN neurons (n=" + str(neuron["unit_count"]) +
+        ") are " + format(float(neuron["mean_mean_sign_balance"]), ".3f") +
+        " and " + format(float(neuron["mean_cancellation_ratio"]), ".3f") +
+        ", respectively. Balance differs descriptively, while cancellation ratios are similar; no type effect is inferred.",
+        "",
+        "**C. No, not as a general explanation of same-type failures.** High-R_MCTC units have larger RMS-profile norm in " +
+        str(high_rms_pairs) + "/" + str(len(same_type_pairs)) +
+        " pairs, but lower sign-balance in " + str(high_less_balance) +
+        " and lower cancellation ratio in " + str(high_less_ratio) +
+        ". Signed-profile norm has same-type domain-balanced rho " +
+        rho("signed_profile_norm", "mean_true_class_logit_drop") + " for logit damage and " +
+        rho("signed_profile_norm", "mean_cross_entropy_increase") +
+        " for CE damage. The sign pattern does not consistently resolve the R_MCTC reversals.",
+        "",
+        "**D. Mostly for prediction instability in these comparisons.** Same-type domain-balanced rho for RMS-profile norm is " +
+        rho("RMS_profile_norm", "prediction_flip_rate") +
+        " with flips, versus " + rho("RMS_profile_norm", "mean_true_class_logit_drop") +
+        " with logit damage and " + rho("RMS_profile_norm", "mean_cross_entropy_increase") +
+        " with CE. R_MCTC-to-flip rho is " +
+        rho("R_MCTC", "prediction_flip_rate") +
+        ". These are descriptive domain-balanced associations (flip rows have fewer valid domains where a domain is tied).",
+        "",
+        "**E. No.** Same-type signed-profile norm rho is " +
+        rho("signed_profile_norm", "mean_true_class_logit_drop") +
+        " for logit damage and " + rho("signed_profile_norm", "mean_cross_entropy_increase") +
+        " for CE; sign-balance rho is " +
+        rho("mean_sign_balance", "mean_true_class_logit_drop") +
+        " and " + rho("mean_sign_balance", "mean_cross_entropy_increase") +
+        ". These signed diagnostics do not show a stronger positive relationship with harmful signed damage.",
+        "",
+        "**F. Yes, as a diagnostic only.** The fixed-cardinality factorial intervention remains useful for exposing span-dependent signed interactions and cancellation, but these data do not validate it as a pruning selector.",
+        "",
+        "**G. RETAIN MCTC ONLY AS DIAGNOSTIC.** On the frozen 18-candidate flip audit: " +
+        baseline_text("mean_abs_d_original") + "; " + baseline_text("G_RMS") +
+        "; " + baseline_text("R_MCTC") +
+        ". R_MCTC is not unique against magnitude baselines.",
+        "",
+        "Interpret all correlations as descriptive; no causal claim or new score is introduced.",
+        "All eight Phase E artifacts are newly written here; previous Task040/Task041 artifacts are inputs only.",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -757,7 +859,7 @@ def analyze(args: argparse.Namespace) -> Dict[str, Any]:
         "same_type_failure_case_count": len(failures) // 2,
         "baseline_flip_comparison": baseline,
         "recommendation": "RETAIN MCTC ONLY AS DIAGNOSTIC",
-        "recommendation_note": "Conservative default pending direct inspection of signed-vs-RMS same-type evidence; no new method is automatically generated.",
+        "recommendation_note": "Observed cancellation is substantial, sign-aware diagnostics do not generally resolve same-type signed-damage failures, and mean_abs_d_original/G_RMS match R_MCTC on the frozen flip ordering; retain MCTC as a diagnostic only.",
         "input_artifacts": {
             "phase_c_raw": str(phase_c), "phase_d1_raw": str(phase_d1),
             "task041_frozen_units": str(task041 / "task041_masking_damage.csv"),

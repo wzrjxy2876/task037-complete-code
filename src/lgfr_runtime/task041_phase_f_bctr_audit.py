@@ -121,6 +121,17 @@ def finite_float(value: Any) -> Optional[float]:
     return result if math.isfinite(result) else None
 
 
+def mask_restoration_is_exact(row: Mapping[str, Any]) -> bool:
+    # The authoritative Phase D CSV uses mask_restored_exact. Accept the older
+    # spelling only as an explicit schema alias; every supplied flag must be true.
+    flags = [
+        str(row[name]).strip().lower()
+        for name in ("mask_restored_exact", "mask_restored_exactly")
+        if name in row and str(row[name]).strip() != ""
+    ]
+    return bool(flags) and all(flag == "true" for flag in flags)
+
+
 def freeze_key(row: Mapping[str, Any]) -> Tuple[str, str, str, str, str]:
     return (
         int_string(row.get("candidate_task040_global_index", row.get("unit_global_index"))),
@@ -1378,8 +1389,8 @@ def analyze(args: argparse.Namespace) -> Dict[str, Any]:
     damage = load_fullval_damage(inputs["fullval_damage_csv"], frozen)
     baseline = load_baseline_scores(inputs["baseline_scores_csv"], frozen)
     for uid, row in damage.items():
-        if not str(row.get("mask_restored_exactly", "")).lower() == "true":
-            raise ValueError("full-validation mask restoration flag is false: " + uid)
+        if not mask_restoration_is_exact(row):
+            raise ValueError("full-validation mask restoration flag is missing, false, or conflicting: " + uid)
     if any(int(float(r["n_samples"])) != 3783 for r in damage.values()):
         raise ValueError("full-validation oracle is not consistently 3783 samples")
     progress("reconstructing signed raw frame-relation signatures")

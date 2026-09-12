@@ -48,23 +48,35 @@ class TestTask041PhaseESignedInteraction(unittest.TestCase):
 
     def test_rms_keeps_magnitude_while_signed_mean_cancels(self) -> None:
         records = []
-        base = {
-            "candidate_task037_global_index": "70",
-            "candidate_task040_global_index": "7",
-            "candidate_layer_name": "layers.0.blocks.0.mlp",
-            "candidate_unit_type": "neuron",
-            "candidate_unit_index": 3,
-            "candidate_stage": 0,
-            "domain_id": "102",
-        }
-        for pair_index in range(48):
-            records.append({
-                **base,
-                "span": 1,
-                "pair_index": pair_index,
-                "C_signed": 2.0 if pair_index < 24 else -2.0,
-            })
-        row = make_span_statistics(records)[0]
+        for unit_number in range(29):
+            is_target = unit_number == 0
+            base = {
+                "candidate_task037_global_index": "70" if is_target else str(1000 + unit_number),
+                "candidate_task040_global_index": "7" if is_target else str(2000 + unit_number),
+                "candidate_layer_name": "layers.0.blocks.0.mlp",
+                "candidate_unit_type": "neuron",
+                "candidate_unit_index": 3 if is_target else unit_number,
+                "candidate_stage": 0,
+                "domain_id": "102",
+            }
+            for span in (1, 2, 4, 8, 16):
+                for pair_index in range(48):
+                    signed_value = (
+                        (2.0 if pair_index < 24 else -2.0)
+                        if is_target and span == 1
+                        else 1.0
+                    )
+                    records.append({
+                        **base,
+                        "span": span,
+                        "pair_index": pair_index,
+                        "C_signed": signed_value,
+                    })
+        rows = make_span_statistics(records)
+        row = next(
+            r for r in rows
+            if r["candidate_task037_global_index"] == "70" and r["span"] == 1
+        )
         self.assertEqual(row["mu"], 0.0)
         self.assertEqual(row["mean_abs"], 2.0)
         self.assertEqual(row["rms"], 2.0)

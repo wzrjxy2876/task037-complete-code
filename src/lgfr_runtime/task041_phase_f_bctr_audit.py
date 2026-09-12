@@ -775,7 +775,7 @@ def make_unit_rows(
             "prediction_flip_rate": float(damage[uid]["prediction_flip_rate"]),
             "R_MCTC": finite_float(damage[uid].get("R_MCTC")),
             "fullval_samples": int(float(damage[uid]["n_samples"])),
-            "mask_restored_exactly": str(damage[uid]["mask_restored_exactly"]).lower() == "true",
+            "mask_restored_exactly": mask_restoration_is_exact(damage[uid]),
             "damage_uses_signed_differences": str(damage[uid]["damage_uses_signed_differences"]).lower() == "true",
             "baseline_candidate": uid in baseline,
         }

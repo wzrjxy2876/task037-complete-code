@@ -8,6 +8,7 @@ from task041_phase_f_bctr_audit import (
     bounded_least_squares,
     choose_low_high,
     dimension_key,
+    mask_restoration_is_exact,
     rank_statistics,
     residual_ratio,
 )
@@ -49,6 +50,17 @@ class TestTask041PhaseFBCTR(unittest.TestCase):
         self.assertEqual(rho, -1.0)
         self.assertEqual(tau, -1.0)
         self.assertEqual(rank_statistics([1.0, 1.0], [2.0, 3.0]), (None, None))
+
+    def test_mask_restoration_accepts_authoritative_phase_d_schema_strictly(self) -> None:
+        self.assertTrue(mask_restoration_is_exact({"mask_restored_exact": "True"}))
+        self.assertTrue(mask_restoration_is_exact({"mask_restored_exactly": "true"}))
+        self.assertFalse(mask_restoration_is_exact({"mask_restored_exact": "False"}))
+        self.assertFalse(mask_restoration_is_exact({}))
+        self.assertFalse(
+            mask_restoration_is_exact(
+                {"mask_restored_exact": "True", "mask_restored_exactly": "False"}
+            )
+        )
 
     def test_score_ties_use_ascending_task037_identity(self) -> None:
         rows = [

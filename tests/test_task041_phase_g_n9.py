@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from task041_phase_g_n9_validation import (
+    frozen_by_task040_index,
     interaction,
     n9_gate,
     signature_row,
@@ -66,6 +67,24 @@ class TestTask041PhaseGN9(unittest.TestCase):
                 passed, checks = n9_gate(*values)
                 self.assertFalse(passed)
                 self.assertFalse(all(checks.values()))
+
+    def test_task040_selector_index_maps_to_task037_frozen_identity(self) -> None:
+        frozen = {
+            "6": {
+                "candidate_task037_global_index": "6",
+                "candidate_task040_global_index": "285",
+            }
+        }
+        mapping = frozen_by_task040_index(frozen)
+        self.assertEqual(mapping["285"][0], "6")
+
+    def test_duplicate_task040_indices_are_rejected(self) -> None:
+        frozen = {
+            "6": {"candidate_task040_global_index": "285"},
+            "7": {"candidate_task040_global_index": "285"},
+        }
+        with self.assertRaises(RuntimeError):
+            frozen_by_task040_index(frozen)
 
     def test_raw_interaction_uses_frozen_signed_order(self) -> None:
         self.assertAlmostEqual(interaction(0.25, 0.05, 0.10, 0.02), 0.12, places=15)

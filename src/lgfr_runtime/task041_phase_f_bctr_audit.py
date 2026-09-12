@@ -221,11 +221,11 @@ def load_baseline_scores(
 
 def dimension_key(row: Mapping[str, Any]) -> Tuple[int, str, int, int, int]:
     return (
-        int_string(row["video_index"]).__int__(),
+        int(int_string(row["video_index"])),
         str(row["video_id"]),
-        int_string(row["level"]).__int__(),
-        int_string(row["block_size"]).__int__(),
-        int_string(row["pair_index"]).__int__(),
+        int(int_string(row["level"])),
+        int(int_string(row["block_size"])),
+        int(int_string(row["pair_index"])),
     )
 
 
@@ -270,9 +270,9 @@ def reconstruct_signatures(
                 raise ValueError("D.1 raw unit is not in the frozen Task041 identity set")
             phase_units[phase].add(uid)
             selected_counts[phase] += 1
-            span = int_string(row["block_size"]).__int__()
-            level = int_string(row["level"]).__int__()
-            pair_index = int_string(row["pair_index"]).__int__()
+            span = int(int_string(row["block_size"]))
+            level = int(int_string(row["level"]))
+            pair_index = int(int_string(row["pair_index"]))
             if span not in SPANS or level != int(round(math.log2(span))):
                 raise ValueError("unexpected span/level in Task040 raw records")
             if pair_index not in range(16):
@@ -994,10 +994,10 @@ def make_calibration_rows(
                 [full_score[u] for u in members],
                 [subset_scores[u] for u in members],
             )
-            full_low = full_order[0]
-            full_high = full_order[-1]
-            subset_low = subset_order[0]
-            subset_high = subset_order[-1]
+            full_low = min(members, key=lambda u: (full_score[u], int(u)))
+            full_high = min(members, key=lambda u: (-full_score[u], int(u)))
+            subset_low = min(members, key=lambda u: (subset_scores[u], int(u)))
+            subset_high = min(members, key=lambda u: (-subset_scores[u], int(u)))
             low_same = full_low == subset_low
             high_same = full_high == subset_high
             exact_same = full_order == subset_order

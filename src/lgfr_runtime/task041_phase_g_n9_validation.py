@@ -26,7 +26,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import task041_phase_f_bctr_audit as phase_f
 
-PROJECT_DEFAULT = "/home/jixinye25/jxy_work1/task040_htor_d39a947"
+PROJECT_DEFAULT = "/home/jixinye25/jxy_work1/swintrans_task035"
 CHECKPOINT_DEFAULT = "/home/jixinye25/jxy_work1/pretrained/checkpoint-68.ckpt"
 FRAME_ROOT = "/data/jixinye25/UCF101_Frame"
 VAL_LIST = "/data/jixinye25/UCF101_Frame/val_rgb_split1.txt"
@@ -348,6 +348,8 @@ def load_model_and_units(project_root: Path, checkpoint: Path, device: Any,
                          frozen: Mapping[str, Mapping[str, Any]]) -> tuple[Any, Any, Any, dict[str, Any]]:
     import task040_htor_probe as probe
     import probe_ctfrs_dynamic_function as ctfrs
+    probe.ensure_project_importable(project_root)
+    ctfrs.ensure_project_importable(project_root)
     adapter = importlib.import_module("ucf101_videoswin_probe_adapter_v2")
     model, adapter_meta = adapter.build_model_for_probe(checkpoint=str(checkpoint), device=device)
     model.eval()
@@ -569,7 +571,7 @@ def signature_row(unit: Mapping[str, Any], span: int, video_index: int, video_id
             "candidate_task037_global_index", "candidate_task040_global_index",
             "candidate_layer_name", "candidate_unit_type", "candidate_unit_index",
             "candidate_stage", "domain_id")},
-        "span": span, "dimension_index": video_index * 16 + pair,
+        "span": span, "level": int(math.log2(span)), "dimension_index": video_index * 16 + pair,
         "video_index": video_index, "video_id": video_id,
         "intervention_level": int(math.log2(span)), "block_size": span, "pair_index": pair,
         "C_signed": value, "representation": "signed_a_minus_b_minus_c_plus_d",

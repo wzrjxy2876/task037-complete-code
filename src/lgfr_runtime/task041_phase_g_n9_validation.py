@@ -913,7 +913,12 @@ def finalize(args: argparse.Namespace) -> None:
 
     cross3, _, _, _ = fit_reconstructions(n3_store, n3_orders, frozen, cross_type_only=True)
     cross9, _, _, _ = fit_reconstructions(n9_store, n9_orders, frozen, cross_type_only=True)
-    cross3_score, cross9_score = aggregate_span_residuals(cross3), aggregate_span_residuals(cross9)
+    cross3_score = aggregate_span_residuals({
+        uid: values for uid, values in cross3.items() if frozen[uid]["domain_id"] in MIXED
+    })
+    cross9_score = aggregate_span_residuals({
+        uid: values for uid, values in cross9.items() if frozen[uid]["domain_id"] in MIXED
+    })
     mixed_rows = []
     for uid in sorted(frozen, key=int):
         if frozen[uid]["domain_id"] in MIXED:

@@ -10,6 +10,7 @@ from task041_phase_f_bctr_audit import (
     dimension_key,
     mask_restoration_is_exact,
     rank_statistics,
+    stage_agnostic_key,
     residual_ratio,
 )
 
@@ -34,6 +35,22 @@ class TestTask041PhaseFBCTR(unittest.TestCase):
         self.assertAlmostEqual(float(fit["alpha"][1]), 1.0, places=10)
         self.assertAlmostEqual(residual_ratio(y, fit["reconstruction"]), 0.0, places=10)
         self.assertGreater(float(np.sum(fit["alpha"])), 1.0)
+
+    def test_stage_agnostic_join_key_preserves_exact_unit_identity(self) -> None:
+        frozen = {
+            "candidate_task040_global_index": "285",
+            "candidate_layer_name": "layers.0.blocks.0.mlp",
+            "candidate_unit_type": "neuron",
+            "candidate_unit_index": "3",
+            "candidate_stage": "0",
+        }
+        raw_without_stage = {
+            "unit_global_index": "285",
+            "layer_name": "layers.0.blocks.0.mlp",
+            "unit_type": "neuron",
+            "unit_index": "3",
+        }
+        self.assertEqual(stage_agnostic_key(frozen), stage_agnostic_key(raw_without_stage))
 
     def test_dimension_key_keeps_video_then_intervention_identity(self) -> None:
         row = {

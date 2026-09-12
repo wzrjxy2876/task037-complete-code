@@ -142,6 +142,16 @@ def freeze_key(row: Mapping[str, Any]) -> Tuple[str, str, str, str, str]:
     )
 
 
+def stage_agnostic_key(row: Mapping[str, Any]) -> Tuple[str, str, str, str]:
+    """Exact frozen unit identity fields present even when a raw CSV omits stage."""
+    return (
+        int_string(row.get("candidate_task040_global_index", row.get("unit_global_index"))),
+        str(row.get("candidate_layer_name", row.get("layer_name", ""))),
+        str(row.get("candidate_unit_type", row.get("unit_type", ""))),
+        int_string(row.get("candidate_unit_index", row.get("unit_index"))),
+    )
+
+
 def fullval_key(row: Mapping[str, Any]) -> Tuple[str, str, str, str]:
     return (
         int_string(row["candidate_task040_global_index"]),
@@ -279,12 +289,27 @@ def reconstruct_signatures(
     skipped_phase_c = 0
     c_exact_matches = 0
     all_video_keys: set[Tuple[int, str]] = set()
+    stage_agnostic_to_uid: Dict[Tuple[str, str, str, str], str] = {}
+    for uid, item in frozen.items():
+        key = stage_agnostic_key(item)
+        if key in stage_agnostic_to_uid:
+            raise ValueError("frozen identity is ambiguous when raw stage is absent")
+        stage_agnostic_to_uid[key] = uid
+    missing_stage_rows = 0
 
     for phase, path in (("phase_c", phase_c_path), ("phase_d1", phase_d1_path)):
         for row in read_csv(path):
             raw_counts[phase] += 1
-            raw_key = freeze_key(row)
-            uid = raw_to_uid.get(raw_key)
+            stage_value = row.get("candidate_stage")
+            if stage_value is None or str(stage_value).strip() == "":
+                stage_value = row.get("stage")
+            if stage_value is None or str(stage_value).strip() == "":
+                if phase != "phase_d1":
+                    raise ValueError("Phase C raw row unexpectedly lacks frozen stage identity")
+                missing_stage_rows += 1
+                uid = stage_agnostic_to_uid.get(stage_agnostic_key(row))
+            else:
+                uid = raw_to_uid.get(freeze_key(row))
             if uid is None:
                 if phase == "phase_c":
                     skipped_phase_c += 1
@@ -361,6 +386,8 @@ def reconstruct_signatures(
         "phase_d1_frozen_unit_count": len(phase_units["phase_d1"]),
         "phase_c_unselected_rows_ignored": skipped_phase_c,
         "phase_c_C_interaction_exact_match_count": c_exact_matches,
+        "phase_d1_raw_rows_missing_stage": missing_stage_rows,
+        "phase_d1_missing_stage_joined_to_unique_frozen_identity": missing_stage_rows > 0,
         "canonical_video_count": len(video_keys),
         "canonical_video_order": [
             {"video_position_1based": i + 1, "video_index": v[0], "video_id": v[1]}

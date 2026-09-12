@@ -9,6 +9,7 @@ import itertools
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -962,6 +963,36 @@ def _baseline_domain_row(domain: str, members: Sequence[str],
     }
 
 
+def _domain_balanced_baseline_row(scope: str, method: str,
+                                  selected_domain_count: int,
+                                  rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    available = [row for row in rows if row.get("safest_identity_match") is not None]
+    valid_spearman = [row for row in available if row.get("spearman") is not None]
+    valid_kendall = [row for row in available if row.get("kendall_tau_b") is not None]
+    return {
+        "row_type": "domain_balanced", "scope": scope, "domain_id": "ALL",
+        "method": method,
+        "unit_count": sum(norm_int(row["unit_count"]) for row in available),
+        "missing_baseline_count": sum(
+            norm_int(row.get("missing_baseline_count", 0)) for row in rows
+        ),
+        "spearman": average(row["spearman"] for row in valid_spearman),
+        "kendall_tau_b": average(row["kendall_tau_b"] for row in valid_kendall),
+        "safest_identity_accuracy": average(
+            1.0 if row["safest_identity_match"] else 0.0 for row in available
+        ),
+        "low_high_correct": sum(row["low_high_ordering"] == "correct" for row in available),
+        "low_high_reverse": sum(row["low_high_ordering"] == "reverse" for row in available),
+        "low_high_tie": sum(row["low_high_ordering"] == "tie" for row in available),
+        "domain_count": selected_domain_count,
+        "available_domain_count": len(available),
+        "valid_domain_count": len(valid_spearman),
+        "valid_spearman_domain_count": len(valid_spearman),
+        "valid_kendall_domain_count": len(valid_kendall),
+        "valid_safest_identity_domain_count": len(available),
+    }
+
+
 def _identity(row: Mapping[str, Any]) -> dict[str, Any]:
     return {key: row[key] for key in (
         "candidate_task037_global_index", "candidate_task040_global_index",
@@ -988,7 +1019,18 @@ def finalize(args: argparse.Namespace) -> None:
     work = Path(args.work_dir)
     config = _config(work)
     output = Path(config["output_dir"])
-    require(not output.exists(), "Phase-H output already exists; refusing overwrite")
+    refresh_output = bool(getattr(args, "refresh_output", False))
+    output_exists = output.exists()
+    if output_exists:
+        require(refresh_output, "Phase-H output already exists; pass --refresh-output only to refresh the exact Phase-H artifact set")
+        require(output.is_dir() and {path.name for path in output.iterdir()} == set(OUTPUT_FILES),
+                "--refresh-output requires the existing output directory to contain exactly the ten Phase-H artifacts")
+        require(all((output / name).is_file() for name in OUTPUT_FILES),
+                "--refresh-output requires ten regular Phase-H artifact files")
+    else:
+        require(not refresh_output, "--refresh-output requires an existing Phase-H output directory")
+    staging = output.with_name(output.name + ".phase_h_staging")
+    require(not staging.exists(), "Phase-H staging path already exists; refusing overwrite")
     for marker in ("phase_h_unmasked_done.json", "phase_h_gpu0_done.json",
                    "phase_h_gpu1_done.json"):
         require((work / marker).is_file(), "missing completed worker marker " + marker)
@@ -1338,7 +1380,7 @@ def finalize(args: argparse.Namespace) -> None:
     # Frozen baselines retain their original values and are compared only to
     # the same existing full-validation CE oracle, within each BMS domain.
     score_maps: dict[str, dict[str, float | None]] = {
-        "R_original": original_risk,
+        "R_original": {uid: 1.0 - W_original[uid] for uid in uids},
         "R_temporal": {uid: 1.0 - W_temporal[uid] for uid in uids},
         "R_BCTR_N9": {uid: float(config_units[uid]["R_BCTR_N9"]) for uid in uids},
     }
@@ -1358,23 +1400,11 @@ def finalize(args: argparse.Namespace) -> None:
                 )
                 row["scope"] = scope
                 baseline_rows.append(row)
-                if row["spearman"] is not None:
+                if row["safest_identity_match"] is not None:
                     group.append(row)
-            baseline_rows.append({
-                "row_type": "domain_balanced", "scope": scope,
-                "domain_id": "ALL", "method": criterion,
-                "unit_count": sum(len([u for u in uids if domains[u] == d])
-                                  for d in selected_domains),
-                "spearman": average(row["spearman"] for row in group),
-                "kendall_tau_b": average(row["kendall_tau_b"] for row in group),
-                "safest_identity_accuracy": average(
-                    1.0 if row["safest_identity_match"] else 0.0 for row in group),
-                "low_high_correct": sum(row["low_high_ordering"] == "correct" for row in group),
-                "low_high_reverse": sum(row["low_high_ordering"] == "reverse" for row in group),
-                "low_high_tie": sum(row["low_high_ordering"] == "tie" for row in group),
-                "domain_count": len(selected_domains),
-                "valid_domain_count": len(group),
-            })
+            baseline_rows.append(_domain_balanced_baseline_row(
+                scope, criterion, len(selected_domains), group
+            ))
 
     subset_summary = {}
     for subset_id in ("n3_phase_f", "n9_full"):
@@ -1453,21 +1483,42 @@ def finalize(args: argparse.Namespace) -> None:
     report = _report(summary, same_type_rows, span_safest_by_domain,
                      detailed_cases, subset_summary, baseline_rows)
 
-    output = Path(config["output_dir"])
-    output.mkdir(parents=True, exist_ok=False)
-    write_csv_new(output / OUTPUT_FILES[0], output_records, RAW_FIELDS)
-    write_csv_new(output / OUTPUT_FILES[1], unit_rows)
-    write_csv_new(output / OUTPUT_FILES[2], span_rows)
-    write_csv_new(output / OUTPUT_FILES[3], original_vs_temporal)
-    write_csv_new(output / OUTPUT_FILES[4], same_type_rows)
-    write_csv_new(output / OUTPUT_FILES[5], mixed_rows)
-    write_csv_new(output / OUTPUT_FILES[6], subset_rows)
-    write_csv_new(output / OUTPUT_FILES[7], baseline_rows)
-    write_json_new(output / OUTPUT_FILES[8], summary)
-    with (output / OUTPUT_FILES[9]).open("x", encoding="utf-8") as handle:
+    staging.mkdir(parents=True, exist_ok=False)
+    write_csv_new(staging / OUTPUT_FILES[0], output_records, RAW_FIELDS)
+    write_csv_new(staging / OUTPUT_FILES[1], unit_rows)
+    write_csv_new(staging / OUTPUT_FILES[2], span_rows)
+    write_csv_new(staging / OUTPUT_FILES[3], original_vs_temporal)
+    write_csv_new(staging / OUTPUT_FILES[4], same_type_rows)
+    write_csv_new(staging / OUTPUT_FILES[5], mixed_rows)
+    write_csv_new(staging / OUTPUT_FILES[6], subset_rows)
+    write_csv_new(staging / OUTPUT_FILES[7], baseline_rows)
+    write_json_new(staging / OUTPUT_FILES[8], summary)
+    with (staging / OUTPUT_FILES[9]).open("x", encoding="utf-8") as handle:
         handle.write(report)
-    require({path.name for path in output.iterdir()} == set(OUTPUT_FILES),
+    require({path.name for path in staging.iterdir()} == set(OUTPUT_FILES),
             "Phase-H output must contain exactly the ten required artifacts")
+    if refresh_output:
+        backup = work / "phase_h_output_before_baseline_fix"
+        require(not backup.exists(), "Phase-H pre-refresh backup already exists; refusing overwrite")
+        shutil.copytree(output, backup)
+        require({path.name for path in backup.iterdir()} == set(OUTPUT_FILES),
+                "Phase-H pre-refresh backup is incomplete")
+        require(all((backup / name).is_file() for name in OUTPUT_FILES),
+                "Phase-H pre-refresh backup contains a non-file artifact")
+        try:
+            for filename in OUTPUT_FILES:
+                os.replace(staging / filename, output / filename)
+            require({path.name for path in output.iterdir()} == set(OUTPUT_FILES)
+                    and all((output / name).is_file() for name in OUTPUT_FILES),
+                    "refreshed Phase-H output has an unexpected artifact set")
+        except Exception:
+            for filename in OUTPUT_FILES:
+                shutil.copy2(backup / filename, output / filename)
+            raise
+        staging.rmdir()
+        say("Previous ten-artifact output preserved at %s" % backup)
+    else:
+        staging.rename(output)
     say("FINAL: %s; output=%s" % (decision, output))
 
 
@@ -1607,14 +1658,19 @@ def _report(summary: Mapping[str, Any],
         "All historical criteria were compared within frozen domains against the same existing full-validation CE "
         "oracle. No baseline was modified.",
         "",
-        "| Criterion | scope | units / valid domains | mean Spearman | mean Kendall | safest accuracy |",
+        "| Criterion | scope | units / available domains (valid rho/tau/safest) | mean Spearman | mean Kendall | safest accuracy |",
         "|---|---|---:|---:|---:|---:|",
     ])
     for row in baseline_rows:
         if row.get("row_type") == "domain_balanced":
-            lines.append("| %s | %s | %s / %s | %s | %s | %s |" % (
-                row.get("method"), row.get("scope"), row.get("unit_count"),
-                row.get("valid_domain_count"), row.get("spearman"),
+            support = "%s / %s (%s/%s/%s)" % (
+                row.get("unit_count"), row.get("available_domain_count"),
+                row.get("valid_spearman_domain_count"),
+                row.get("valid_kendall_domain_count"),
+                row.get("valid_safest_identity_domain_count"),
+            )
+            lines.append("| %s | %s | %s | %s | %s | %s |" % (
+                row.get("method"), row.get("scope"), support, row.get("spearman"),
                 row.get("kendall_tau_b"), row.get("safest_identity_accuracy")))
     lines.extend([
         "",
@@ -1635,6 +1691,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", default=CHECKPOINT_DEFAULT)
     parser.add_argument("--output-dir", default=OUTPUT_DEFAULT)
     parser.add_argument("--work-dir", default=WORK_DEFAULT)
+    parser.add_argument("--refresh-output", action="store_true",
+                        help="replace only the exact existing ten-file Phase-H output after preserving a backup")
     parser.add_argument("--gpu", type=int, choices=(0, 1))
     args = parser.parse_args()
     if args.phase == "worker":

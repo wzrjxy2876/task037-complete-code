@@ -64,8 +64,11 @@ tmux new-window -t MC -n phase_h_finalize
 tmux send-keys -t MC:phase_h_finalize 'cd /home/jixinye25/jxy_work1/task040_htor_d39a947 && /home/jixinye25/miniconda3/envs/MC_Pruning/bin/python -u src/lgfr_runtime/task041_phase_h_temporal_stress.py finalize' C-m
 ```
 
-The script refuses to overwrite an existing work/output directory or repeat the one-time unmasked
-cache. It writes the ten required result artifacts only to
+The script refuses to overwrite an existing work directory or repeat the one-time unmasked cache.
+Finalization refuses an existing output by default. A deliberate post-hoc refresh is available only
+with `--refresh-output`, only if the output directory contains exactly the ten Phase-H artifacts;
+it preserves a full pre-refresh copy under the work directory before replacing those ten files. It
+writes the result artifacts only to
 `/data/jixinye25/work1/output/task041_phase_h_temporal_stress_ranking/`.
 
 ## Decision interpretation
@@ -84,4 +87,6 @@ pruning or training is authorized by this phase.
 
 Some historical Phase-F baseline columns are blank for units outside their original baseline set.
 Those cells remain missing; baseline comparisons use only the recorded values (and report their
-unit/domain counts). No historical score is imputed, inferred, or regenerated.
+unit/domain counts). Domain-level correlation support and safest-identity support are counted
+separately, so a domain with undefined Spearman/Kendall but an available safest identity remains in
+the safest-accuracy denominator. No historical score is imputed, inferred, or regenerated.

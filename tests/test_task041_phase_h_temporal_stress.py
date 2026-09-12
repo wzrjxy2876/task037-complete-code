@@ -55,6 +55,28 @@ class RankStatisticTests(unittest.TestCase):
         self.assertAlmostEqual(row["spearman"], -1.0)
         self.assertEqual(row["low_high_ordering"], "reverse")
 
+    def test_domain_without_defined_correlations_still_counts_for_safest_accuracy(self):
+        domain_row = phase_h._baseline_domain_row(
+            "269", ["1", "2"],
+            {"1": 0.5, "2": 0.5},
+            {"1": 0.1, "2": 0.2},
+            "frozen_metric",
+        )
+        self.assertIsNone(domain_row["spearman"])
+        self.assertIsNone(domain_row["kendall_tau_b"])
+        self.assertIs(domain_row["safest_identity_match"], True)
+
+        aggregate = phase_h._domain_balanced_baseline_row(
+            "same_type", "frozen_metric", 7, [domain_row]
+        )
+        self.assertEqual(aggregate["available_domain_count"], 1)
+        self.assertEqual(aggregate["valid_spearman_domain_count"], 0)
+        self.assertEqual(aggregate["valid_kendall_domain_count"], 0)
+        self.assertEqual(aggregate["valid_safest_identity_domain_count"], 1)
+        self.assertEqual(aggregate["safest_identity_accuracy"], 1.0)
+        self.assertIsNone(aggregate["spearman"])
+        self.assertIsNone(aggregate["kendall_tau_b"])
+
 
 class FrozenSubsetTests(unittest.TestCase):
     def test_all_27_class_balanced_n6_subsets(self):

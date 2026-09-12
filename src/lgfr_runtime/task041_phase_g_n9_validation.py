@@ -638,6 +638,8 @@ def fit_reconstructions(store: Mapping[str, Mapping[int, Mapping[Any, float]]],
     fit_rows, pair_rows = [], []
     for uid in sorted(frozen, key=int):
         item = frozen[uid]
+        if cross_type_only and item["domain_id"] not in MIXED:
+            continue
         peers = [peer for peer in members[item["domain_id"]] if peer != uid and
                  (not cross_type_only or frozen[peer]["candidate_unit_type"] != item["candidate_unit_type"])]
         require(bool(peers), "no eligible peers for candidate " + uid)

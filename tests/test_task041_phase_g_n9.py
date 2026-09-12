@@ -68,7 +68,7 @@ class TestTask041PhaseGN9(unittest.TestCase):
                 self.assertFalse(all(checks.values()))
 
     def test_raw_interaction_uses_frozen_signed_order(self) -> None:
-        self.assertEqual(interaction(0.25, 0.05, 0.10, 0.02), 0.12)
+        self.assertAlmostEqual(interaction(0.25, 0.05, 0.10, 0.02), 0.12, places=15)
 
     def test_signature_keeps_span_and_canonical_dimension_identity(self) -> None:
         unit = {

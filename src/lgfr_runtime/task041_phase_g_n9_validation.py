@@ -28,7 +28,7 @@ import task041_phase_f_bctr_audit as phase_f
 
 PROJECT_DEFAULT = "/home/jixinye25/jxy_work1/swintrans_task035"
 CHECKPOINT_DEFAULT = "/home/jixinye25/jxy_work1/pretrained/checkpoint-68.ckpt"
-FRAME_ROOT = "/data/jixinye25/UCF101_Frame"
+FRAME_ROOT = "/data/jixinye25/UCF101_Frame/frames"
 VAL_LIST = "/data/jixinye25/UCF101_Frame/val_rgb_split1.txt"
 OUTPUT_DEFAULT = "/data/jixinye25/work1/output/task041_phase_g_bctr_n9_validation"
 WORK_DEFAULT = "/tmp/task041_phase_g_bctr_n9_validation_work"

@@ -81,6 +81,17 @@ def read_csv(path: Path) -> List[Dict[str, str]]:
         return list(csv.DictReader(f))
 
 
+def union_fieldnames(rows: Sequence[Mapping[str, Any]]) -> List[str]:
+    names: List[str] = []
+    seen = set()
+    for row in rows:
+        for name in row:
+            if name not in seen:
+                seen.add(name)
+                names.append(name)
+    return names
+
+
 def write_csv(path: Path, fieldnames: Sequence[str], rows: Sequence[Mapping[str, Any]]) -> None:
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(fieldnames), extrasaction="ignore")
@@ -1581,15 +1592,15 @@ def analyze(args: argparse.Namespace) -> Dict[str, Any]:
         raise ValueError("collective fit exceeded its feasible pairwise submodel beyond numeric tolerance")
 
     output_dir.mkdir(parents=True, exist_ok=False)
-    signature_fields = list(signatures[0].keys())
-    recon_fields = list(reconstruction_rows[0].keys())
-    unit_fields = list(unit_rows[0].keys())
-    same_fields = list(primary_oracle_rows[0].keys())
-    mixed_fields = list(mixed_rows[0].keys()) if mixed_rows else []
-    pair_fields = list(collective_pairwise_rows[0].keys())
-    ablation_fields = list(ablation_rows[0].keys())
-    calibration_fields = list(calibration_rows[0].keys())
-    baseline_fields = list(baseline_rows[0].keys())
+    signature_fields = union_fieldnames(signatures)
+    recon_fields = union_fieldnames(reconstruction_rows)
+    unit_fields = union_fieldnames(unit_rows)
+    same_fields = union_fieldnames(primary_oracle_rows)
+    mixed_fields = union_fieldnames(mixed_rows) if mixed_rows else []
+    pair_fields = union_fieldnames(collective_pairwise_rows)
+    ablation_fields = union_fieldnames(ablation_rows)
+    calibration_fields = union_fieldnames(calibration_rows)
+    baseline_fields = union_fieldnames(baseline_rows)
     write_csv(output_dir / OUT_NAMES[0], signature_fields, signatures)
     write_csv(output_dir / OUT_NAMES[1], recon_fields, reconstruction_rows)
     write_csv(output_dir / OUT_NAMES[2], unit_fields, unit_rows)

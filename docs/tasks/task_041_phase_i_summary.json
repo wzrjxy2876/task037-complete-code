@@ -1,0 +1,342 @@
+{
+  "all_frozen_domains": [
+    "271",
+    "297",
+    "269",
+    "400",
+    "415",
+    "102",
+    "103",
+    "113",
+    "76"
+  ],
+  "bootstrap_rerun": false,
+  "branch": "task_041_collective_temporal_coverage_pruning_oracle",
+  "checkpoint_sha256": "4ce0dad71e51f6af65b07ec2c46a10a3e792b694d6427dedc2626d22c0744c63",
+  "class_diversity_original_only_comparison": {
+    "3x3_safest_accuracy": 0.2857142857142857,
+    "9x1_safest_accuracy": 0.14285714285714285,
+    "correction_domains": [
+      "113"
+    ],
+    "regression_domains": [
+      "269",
+      "400"
+    ],
+    "safest_accuracy_delta": -0.14285714285714285
+  },
+  "class_diversity_temporal_vs_original_accuracy_delta_difference": -0.14285714285714285,
+  "cohorts": {
+    "10x1": {
+      "class_counts": {
+        "16": 1,
+        "17": 1,
+        "32": 1,
+        "39": 1,
+        "53": 1,
+        "54": 1,
+        "62": 1,
+        "63": 1,
+        "72": 1,
+        "87": 1
+      },
+      "new_inference_video_count": 10,
+      "unique_class_count": 10,
+      "video_count": 10
+    },
+    "3x3": {
+      "class_counts": {
+        "39": 3,
+        "53": 3,
+        "72": 3
+      },
+      "new_inference_video_count": 0,
+      "unique_class_count": 3,
+      "video_count": 9
+    },
+    "9x1": {
+      "class_counts": {
+        "16": 1,
+        "17": 1,
+        "32": 1,
+        "39": 1,
+        "53": 1,
+        "54": 1,
+        "62": 1,
+        "63": 1,
+        "72": 1
+      },
+      "new_inference_video_count": 9,
+      "unique_class_count": 9,
+      "video_count": 9
+    }
+  },
+  "combined_ce_rows": 65772,
+  "decision": "C. CLASS_DIVERSITY_DOES_NOT_RESCUE_TEMPORAL_SELECTION",
+  "decision_statement": "The 9x1 temporal cohort does not improve safest-candidate accuracy over the equal-size 3x3 cohort. Increasing action-class diversity does not rescue the current post-BMS temporal-stress selector.",
+  "finetuning_performed": false,
+  "frozen_unit_count": 29,
+  "full_validation_oracle": "reused Phase-D mean_cross_entropy_increase, n=3783; no rerun",
+  "full_validation_oracle_rerun": false,
+  "gpu_protocol": {
+    "amp": false,
+    "dtype": "float32",
+    "independent_workers": true,
+    "new_videos_inferred_once": 10,
+    "physical_gpus": [
+      0,
+      1
+    ]
+  },
+  "input_sha256": {
+    "checkpoint": "4ce0dad71e51f6af65b07ec2c46a10a3e792b694d6427dedc2626d22c0744c63",
+    "checkpoint_identity": "9e07ad165e0a6e05b20c4ba8a95a7346d237c730f1f233aabdad79dcfa68786a",
+    "fullval_damage": "32857b47a130c2fa701cbf4c7a42677c7e87b32a5502d291935584228196e3ba",
+    "h1_summary": "5ab642be384c268124cb86164858f2a72e24036fbbcc2ecc4d7eee0b710bddb8",
+    "h_ce": "289c92c7946c0f0543eb12a48dea6ec637119be5131c817bc279e1b81e3a9f53",
+    "h_summary": "0955b90157993b381e94d11a4b9b9f3de9e43991547376c469a28dfc47f7cba3",
+    "h_unit": "cb09181a06f3520ad5f8be833925112ff3f1e68822aed1b3311d784885479250",
+    "interventions": "e2e4cc55447222d0c2a552f6bafae50d46137d59bf568cacfbe461f5d6380616",
+    "n30_manifest": "2bd853ec8f3baa50a32af59c00c6186e1560171b20c0d25243d0edb827b0941f",
+    "n30_summary": "0377254fb83ae1d95da7f6c7f7fd566a6e16a028ea381bfc168a4f588f64c7e0",
+    "n9_manifest": "fffff988edfc91e1255f76bbed3b95dfc866e545381814b51961b3abde4e1dc3",
+    "phase_f_summary": "2f32033352d702af66dcdd1a94a749d5c4fd648482fe63ccff795169cabdb229",
+    "phase_f_units": "e1bea71cc94f748b133d0e7624da42624364faf36c6b3c857cdfac86592e4e67",
+    "phase_g_summary": "b3bb8aa2c2546f93e12c757c1a93c237b4b5775fcfd966de875609b5ef20e468",
+    "phase_g_units": "db434a1edd8dbd1eafbd016452a236b5e00362df4a188fa3180bb3a43ba162b1",
+    "val_list": "e4a52c2bbc2789c00ed165cb458cf90a4f719dae2a000c08ed05dc98195da71a"
+  },
+  "leave_one_class_out_safest_stability_by_removed_class": [
+    {
+      "class_id": 16,
+      "class_name": "BoxingPunchingBag",
+      "domain_count": 7,
+      "mean_rank_spearman": 0.6428571428571429,
+      "stability_fraction": 0.7142857142857143,
+      "stable_domains": 5
+    },
+    {
+      "class_id": 17,
+      "class_name": "BoxingSpeedBag",
+      "domain_count": 7,
+      "mean_rank_spearman": 1.0,
+      "stability_fraction": 1.0,
+      "stable_domains": 7
+    },
+    {
+      "class_id": 32,
+      "class_name": "GolfSwing",
+      "domain_count": 7,
+      "mean_rank_spearman": 0.7857142857142857,
+      "stability_fraction": 1.0,
+      "stable_domains": 7
+    },
+    {
+      "class_id": 39,
+      "class_name": "HighJump",
+      "domain_count": 7,
+      "mean_rank_spearman": 1.0,
+      "stability_fraction": 1.0,
+      "stable_domains": 7
+    },
+    {
+      "class_id": 53,
+      "class_name": "Mixing",
+      "domain_count": 7,
+      "mean_rank_spearman": 0.7857142857142857,
+      "stability_fraction": 1.0,
+      "stable_domains": 7
+    },
+    {
+      "class_id": 54,
+      "class_name": "MoppingFloor",
+      "domain_count": 7,
+      "mean_rank_spearman": 0.2857142857142857,
+      "stability_fraction": 0.5714285714285714,
+      "stable_domains": 4
+    },
+    {
+      "class_id": 62,
+      "class_name": "PlayingGuitar",
+      "domain_count": 7,
+      "mean_rank_spearman": 1.0,
+      "stability_fraction": 1.0,
+      "stable_domains": 7
+    },
+    {
+      "class_id": 63,
+      "class_name": "PlayingPiano",
+      "domain_count": 7,
+      "mean_rank_spearman": 1.0,
+      "stability_fraction": 1.0,
+      "stable_domains": 7
+    },
+    {
+      "class_id": 72,
+      "class_name": "Rafting",
+      "domain_count": 7,
+      "mean_rank_spearman": 0.8571428571428571,
+      "stability_fraction": 0.8571428571428571,
+      "stable_domains": 6
+    },
+    {
+      "class_id": 87,
+      "class_name": "Surfing",
+      "domain_count": 7,
+      "mean_rank_spearman": 0.6428571428571429,
+      "stability_fraction": 0.8571428571428571,
+      "stable_domains": 6
+    }
+  ],
+  "mask_restoration_exact_for_all_records": true,
+  "new_masked_ce_rows": 23490,
+  "no_result_inspected_during_selection": true,
+  "output_sha256": {
+    "task041_phase_i_3x3_vs_9x1.csv": "dfe0a9707c907ae9d6c571a3de125cbe6380b036a14ca433263b78daacd693c6",
+    "task041_phase_i_ce_records.csv": "514e8d4e0d60a265c030046ae1e6edacc4114a783bca097b07ab8da9cd95a475",
+    "task041_phase_i_class_diversity_manifest.csv": "60d4c4fc5adb90049659acdcbdc5cd2658ba91125386c5acd31c60fb95aeffe5",
+    "task041_phase_i_leave_one_class_out.csv": "b89ba3c8ca633b52e26a2c21f5825b1cb11923127d0cc0e970f1d73c6b693a13",
+    "task041_phase_i_original_vs_temporal_9x1.csv": "a7cd22bbffb0e854fbd0e5f7002e3620afebefe5a90107e475abd865977d28c0",
+    "task041_phase_i_per_span_9x1.csv": "e90ee0156917e0431c14bd0a823ae5e3bcef58a95a9f512db56e1ae1af943a2e",
+    "task041_phase_i_report.md": "58d2faa61d119767e724248bdf6b2eb4d428c6e768a959e8512485e56cb24a19",
+    "task041_phase_i_same_type_oracle.csv": "e288caebae25404178f0d7b11cf33ee679df52ce6a7269e89011a1ab7014e387",
+    "task041_phase_i_unit_ranking.csv": "235f90368e13779ce3f0a6351611fb2867ac5567c5789441e6de54ceff39f5b9"
+  },
+  "phase_h1_result_changed": false,
+  "phase_h1_result_preserved": {
+    "same_type_safest_correct_count": {
+      "R_original": 2,
+      "R_temporal": 2,
+      "denominator": 7
+    },
+    "same_type_temporal_correction_count": 0,
+    "same_type_temporal_regression_count": 0,
+    "scientific_top1_selection_value": "NO_DEMONSTRATED_TOP1_SELECTION_VALUE"
+  },
+  "phase_h_3x3_inference_rerun": false,
+  "predeclared_A_conditions": {
+    "9x1_temporal_domain_balanced_spearman_positive": false,
+    "9x1_temporal_safest_accuracy_exceeds_3x3": false,
+    "at_least_one_temporal_class_diversity_correction": false,
+    "temporal_class_diversity_corrections_exceed_regressions": false,
+    "within_9x1_temporal_incremental_gate_passed": false
+  },
+  "prepared_head": "dc90da61a15ecb76231cf7e468681b59e501627a",
+  "primary_same_type_domains": [
+    "269",
+    "400",
+    "415",
+    "102",
+    "103",
+    "113",
+    "76"
+  ],
+  "production_pruning_or_bms_changed": false,
+  "pruning_performed": false,
+  "same_type_temporal_10x1_safest_accuracy": 0.14285714285714285,
+  "same_type_temporal_3x3_safest_accuracy": 0.2857142857142857,
+  "same_type_temporal_9x1_domain_balanced_kendall": -0.42857142857142855,
+  "same_type_temporal_9x1_domain_balanced_spearman": -0.42857142857142855,
+  "same_type_temporal_9x1_safest_accuracy": 0.0,
+  "same_type_temporal_class_diversity_corrections": [],
+  "same_type_temporal_class_diversity_regressions": [
+    "269",
+    "400"
+  ],
+  "selection_provenance": {
+    "manifest_path": "/data/jixinye25/work1/output/task041_collective_temporal_coverage_pruning_oracle/task041_video_manifest.csv",
+    "manifest_sha256": "2bd853ec8f3baa50a32af59c00c6186e1560171b20c0d25243d0edb827b0941f",
+    "seed": 3407,
+    "selected_classes": [
+      16,
+      17,
+      32,
+      39,
+      53,
+      54,
+      62,
+      63,
+      72,
+      87
+    ],
+    "selected_video_dataset_indices": [
+      633,
+      641,
+      635,
+      670,
+      693,
+      671,
+      1235,
+      1231,
+      1236,
+      1500,
+      1490,
+      1504,
+      2004,
+      2018,
+      2037,
+      2055,
+      2066,
+      2078,
+      2395,
+      2383,
+      2397,
+      2422,
+      2435,
+      2415,
+      2742,
+      2726,
+      2735,
+      3293,
+      3287,
+      3290
+    ],
+    "summary_git_branch": "task_041_collective_temporal_coverage_pruning_oracle",
+    "summary_git_commit": "a47e2ddd7ff30db2353bf4b37d4819d843bc85e5",
+    "summary_path": "/data/jixinye25/work1/output/task041_collective_temporal_coverage_pruning_oracle/task041_summary.json"
+  },
+  "selection_rule": "Sort canonical class IDs ascending; take the first nine/all ten classes; within each take its first row in the authoritative N=30 manifest.",
+  "task": "Task041 Phase I action-class diversity control for post-BMS temporal stress selection",
+  "task042_created": false,
+  "temporal_protocol": {
+    "frames_swapped_per_intervention": 2,
+    "higher_W_safer": true,
+    "pairs_per_span": 16,
+    "risk": "R=1-W",
+    "sampled_frames": 32,
+    "signed_damage": "CE(masked) - CE(unmasked)",
+    "spans": [
+      1,
+      2,
+      4,
+      8,
+      16
+    ],
+    "tie_break": "ascending numeric Task037 global_index"
+  },
+  "within_9x1_original_vs_temporal": {
+    "corrections": [],
+    "gate": "TEMPORAL_STRESS_ADDS_NO_CLEAR_VALUE",
+    "gate_details": {
+      "better_than_original_on_at_least_one_primary_measure": false,
+      "gate_passed": false,
+      "improved_primary_measures": [],
+      "not_worse_on_all_remaining_primary_measures": false,
+      "positive_same_type_domain_balanced_ce_spearman": false,
+      "rejection_threshold_added": false
+    },
+    "original": {
+      "kendall": -0.3333333333333333,
+      "safest_accuracy": 0.14285714285714285,
+      "spearman": -0.3333333333333333
+    },
+    "regressions": [
+      "113"
+    ],
+    "temporal": {
+      "kendall": -0.42857142857142855,
+      "safest_accuracy": 0.0,
+      "spearman": -0.42857142857142855
+    }
+  }
+}

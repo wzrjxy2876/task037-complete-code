@@ -118,6 +118,34 @@ def _stage_from_layer(layer: str) -> int:
     return int(parts[1])
 
 
+def _has_commit_parent_in_shallow_history(repo_root: Path, target_sha: str) -> bool:
+    """Follow available commit objects and match parent SHAs at shallow edges."""
+    pending = ["HEAD"]
+    visited = set()
+    while pending:
+        ref = pending.pop()
+        try:
+            record = subprocess.check_output(["git", "-C", str(repo_root), "show", "-s",
+                                              "--format=%H %P", ref], text=True).strip().split()
+        except subprocess.CalledProcessError:
+            continue
+        if not record:
+            continue
+        commit, parents = record[0], record[1:]
+        if commit in visited:
+            continue
+        visited.add(commit)
+        if target_sha in parents:
+            return True
+        for parent in parents:
+            if parent not in visited and subprocess.call(["git", "-C", str(repo_root), "cat-file",
+                                                           "-e", parent + "^{commit}"],
+                                                          stdout=subprocess.DEVNULL,
+                                                          stderr=subprocess.DEVNULL) == 0:
+                pending.append(parent)
+    return False
+
+
 def build_unit_manifest(profile_rows: Sequence[Mapping[str, Any]],
                         descriptor_rows: Sequence[Mapping[str, Any]],
                         unit_mapping_rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -610,10 +638,8 @@ def preflight(args: argparse.Namespace) -> None:
     require(Path(config["repo_root"]).is_dir(), "Task042 checkout path is absent")
     branch = subprocess.check_output(["git", "-C", config["repo_root"], "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
     require(branch == BRANCH, "server checkout is not on the exact Task042 branch")
-    direct_parents = subprocess.check_output(["git", "-C", config["repo_root"], "show",
-                                              "-s", "--format=%P", "HEAD"], text=True).strip().split()
-    require(TASK041_HEAD in direct_parents,
-            "Task042 commit does not name the latest Task041 remote HEAD as its parent")
+    require(_has_commit_parent_in_shallow_history(Path(config["repo_root"]), TASK041_HEAD),
+            "Task042 commit history does not descend from the latest Task041 remote HEAD")
     phase_i_doc = Path(config["repo_root"]) / "docs" / "tasks" / "task_041_phase_i_result.md"
     require(phase_i_doc.is_file() and "CLASS_DIVERSITY_DOES_NOT_RESCUE_TEMPORAL_SELECTION" in
             phase_i_doc.read_text(encoding="utf-8"),

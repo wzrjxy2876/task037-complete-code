@@ -610,9 +610,10 @@ def preflight(args: argparse.Namespace) -> None:
     require(Path(config["repo_root"]).is_dir(), "Task042 checkout path is absent")
     branch = subprocess.check_output(["git", "-C", config["repo_root"], "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
     require(branch == BRANCH, "server checkout is not on the exact Task042 branch")
-    require(subprocess.call(["git", "-C", config["repo_root"], "merge-base", "--is-ancestor",
-                             TASK041_HEAD, "HEAD"]) == 0,
-            "Task042 branch does not descend from the latest Task041 remote HEAD")
+    direct_parents = subprocess.check_output(["git", "-C", config["repo_root"], "show",
+                                              "-s", "--format=%P", "HEAD"], text=True).strip().split()
+    require(TASK041_HEAD in direct_parents,
+            "Task042 commit does not name the latest Task041 remote HEAD as its parent")
     phase_i_doc = Path(config["repo_root"]) / "docs" / "tasks" / "task_041_phase_i_result.md"
     require(phase_i_doc.is_file() and "CLASS_DIVERSITY_DOES_NOT_RESCUE_TEMPORAL_SELECTION" in
             phase_i_doc.read_text(encoding="utf-8"),

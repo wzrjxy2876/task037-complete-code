@@ -24,6 +24,10 @@ fi
 
 run_model() {
   local model="$1" python="$2" physical_gpu="$3"
+  if [[ -f "${OUT_ROOT}/${RUN_ID}/${model}/evaluation/summary.json" ]]; then
+    echo "=== ${model}: existing completed summary found; skipping ==="
+    return
+  fi
   echo "=== ${model}: audit (physical GPU ${physical_gpu} only) ==="
   CUDA_VISIBLE_DEVICES="${physical_gpu}" "${python}" "${PY_SCRIPT}" audit \
     --model "${model}" --annotation "${ANNOTATION}" --output-root "${OUT_ROOT}" --run-id "${RUN_ID}"

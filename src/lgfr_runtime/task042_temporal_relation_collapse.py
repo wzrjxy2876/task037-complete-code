@@ -10,12 +10,14 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib
 import json
 import math
 import os
 import random
 import sys
 import time
+import types
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -473,6 +475,30 @@ def _load_video_input(entry: dict[str, Any], frame_root: str, spatial_transform:
     return torch.stack(frames, dim=0).permute(1, 0, 2, 3).contiguous()
 
 
+def _load_dataset_helpers(source_root: str) -> tuple[Any, Any, str]:
+    """Load the repository's exact frame transforms without importing its heavy utils.py.
+
+    The existing utils.py imports GluonCV code that is incompatible with the
+    server's PyTorch 1.12 environment. dataset.ucf101 only needs the path
+    constant from that module; provide that constant while importing the
+    dataset helpers, then restore normal module resolution for model loading.
+    """
+    if source_root not in sys.path:
+        sys.path.insert(0, source_root)
+    previous_utils = sys.modules.get("utils")
+    utils_shim = types.ModuleType("utils")
+    utils_shim.UCF_DATA_ROOT = "/data/jixinye25/UCF101_Frame/frames"
+    sys.modules["utils"] = utils_shim
+    try:
+        dataset_module = importlib.import_module("dataset.ucf101")
+        return dataset_module.pil_loader, dataset_module.test_transform, utils_shim.UCF_DATA_ROOT
+    finally:
+        if previous_utils is None:
+            sys.modules.pop("utils", None)
+        else:
+            sys.modules["utils"] = previous_utils
+
+
 def _mean(values: Iterable[float]) -> Optional[float]:
     items = [float(v) for v in values if v is not None and math.isfinite(float(v))]
     return sum(items) / len(items) if items else None
@@ -522,11 +548,8 @@ def run_model(args: argparse.Namespace) -> dict[str, Any]:
     device = torch.device(args.device)
     torch.cuda.set_device(device)
 
-    sys.path.insert(0, source_root)
-    from dataset.ucf101 import pil_loader, test_transform
-    from utils import UCF_DATA_ROOT
-
-    spatial_transform, temporal_transform = test_transform()
+    pil_loader, make_test_transform, default_frame_root = _load_dataset_helpers(source_root)
+    spatial_transform, temporal_transform = make_test_transform()
     model = _load_model(args.model, source_root, device)
     _, _ = _load_weights(model, base_path, args.model)
     prune_obj = _safe_load(prune_path)
@@ -541,7 +564,7 @@ def run_model(args: argparse.Namespace) -> dict[str, Any]:
     start_time = time.time()
 
     for entry_number, entry in enumerate(entries, start=1):
-        cpu_clip = _load_video_input(entry, args.frames_root or UCF_DATA_ROOT,
+        cpu_clip = _load_video_input(entry, args.frames_root or default_frame_root,
                                      spatial_transform, temporal_transform, pil_loader)
         batch = cpu_clip.unsqueeze(0).to(device, non_blocking=True)
         cache = {}

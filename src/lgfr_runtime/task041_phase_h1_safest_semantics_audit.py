@@ -31,6 +31,15 @@ H1_FILES = (
     "task041_phase_h1_summary.json",
     "task041_phase_h1_report.md",
 )
+H1_OUTPUT_DEFAULT = "/data/jixinye25/work1/output/task041_phase_h1_semantics_audit"
+NO_TOP1_SELECTION_VALUE_STATEMENT = (
+    "Temporal stress changes intra-domain rank structure but provides no incremental "
+    "top-1 pruning-candidate selection value on the current same-type cohort."
+)
+EXPECTED_FROZEN_RANK_ASSOCIATIONS = {
+    "R_original": {"spearman": -0.14285714285714285, "kendall_tau_b": -0.09523809523809522},
+    "R_temporal": {"spearman": 0.07142857142857142, "kendall_tau_b": 0.04761904761904761},
+}
 METHOD_FIELDS = {"R_original": "W_original", "R_temporal": "W_temporal_N9"}
 IDENTITY_FIELDS = (
     "candidate_task037_global_index", "candidate_task040_global_index",
@@ -285,21 +294,124 @@ def _validate_class_coverage(manifest: Sequence[Mapping[str, Any]],
     })
     return video_rows + subset_audit_rows, summary
 
+def top1_value_decision(changed_count: int, correction_count: int,
+                        regression_count: int, exact_order_equal_domain_count: int,
+                        domain_count: int) -> tuple[str, str]:
+    if changed_count == 0 or correction_count == 0:
+        if changed_count == 0 and exact_order_equal_domain_count < domain_count:
+            rationale = NO_TOP1_SELECTION_VALUE_STATEMENT
+        elif changed_count == 0:
+            rationale = (
+                "Temporal stress changed neither the complete intra-domain ordering "
+                "nor the safest top-1 candidate."
+            )
+        else:
+            rationale = "There are changed top-1 choices but none corrects the original choice."
+        return "NO_DEMONSTRATED_TOP1_SELECTION_VALUE", rationale
+    if regression_count == 0:
+        return (
+            "ADDS_TOP1_SELECTION_VALUE",
+            "Every changed same-type top-1 choice is a correction and none is a regression.",
+        )
+    return (
+        "UNRESOLVED",
+        "The same-type cohort contains both top-1 corrections and regressions.",
+    )
+
+
+def _legacy_safest_report_claims(report: str) -> dict[str, dict[str, Any]]:
+    claims: dict[str, dict[str, Any]] = {}
+    for line in report.splitlines():
+        cells = [cell.strip() for cell in line.split("|")]
+        if len(cells) >= 6 and cells[1] in ("Original-only", "Temporal stress"):
+            claims[cells[1]] = {
+                "safest_identity_accuracy": float(cells[4]),
+                "low_high_correct_reverse_tie": cells[5],
+            }
+    require(set(claims) == {"Original-only", "Temporal stress"},
+            "cannot locate both legacy Phase-H comparison rows in the report")
+    require(math.isclose(claims["Original-only"]["safest_identity_accuracy"],
+                         4.0 / 7.0, rel_tol=0.0, abs_tol=1e-12)
+            and math.isclose(claims["Temporal stress"]["safest_identity_accuracy"],
+                             2.0 / 7.0, rel_tol=0.0, abs_tol=1e-12),
+            "legacy Phase-H report does not contain the expected displayed safest accuracies")
+    return claims
+
+def _verify_frozen_rank_associations(
+    original_summary: Mapping[str, Any], temporal_summary: Mapping[str, Any],
+    baseline_rows: Sequence[Mapping[str, Any]],
+    same_type_oracle: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    audit: dict[str, Any] = {}
+    for method, recomputed in (("R_original", original_summary),
+                               ("R_temporal", temporal_summary)):
+        matches = [row for row in baseline_rows
+                   if row.get("row_type") == "domain_balanced"
+                   and row.get("scope") == "same_type"
+                   and row.get("method") == method]
+        require(len(matches) == 1, "missing/duplicate frozen baseline rank row: " + method)
+        stored = matches[0]
+        expected = EXPECTED_FROZEN_RANK_ASSOCIATIONS[method]
+        values = {
+            "spearman": recomputed["spearman"],
+            "kendall_tau_b": recomputed["kendall"],
+        }
+        baseline_values = {
+            "spearman": _float(stored, "spearman"),
+            "kendall_tau_b": _float(stored, "kendall_tau_b"),
+        }
+        for statistic, target in expected.items():
+            require(values[statistic] is not None
+                    and math.isclose(float(values[statistic]), target, rel_tol=0.0, abs_tol=1e-12),
+                    "recomputed frozen Phase-H rank association changed: %s/%s" % (method, statistic))
+            require(math.isclose(baseline_values[statistic], target, rel_tol=0.0, abs_tol=1e-12),
+                    "saved Phase-H baseline rank association changed: %s/%s" % (method, statistic))
+        audit[method] = {
+            "expected_frozen": expected,
+            "recomputed_from_frozen_unit_records": values,
+            "saved_phase_h_baseline_comparison": baseline_values,
+            "verified_unchanged": True,
+        }
+    oracle_rows = [row for row in same_type_oracle
+                   if row.get("row_type") == "domain_balanced"
+                   and row.get("domain_id") == "ALL"
+                   and row.get("scope") == "same_type"]
+    require(len(oracle_rows) == 1, "missing/duplicate Phase-H same-type oracle aggregate")
+    oracle = oracle_rows[0]
+    temporal_expected = EXPECTED_FROZEN_RANK_ASSOCIATIONS["R_temporal"]
+    oracle_values = {
+        "spearman": _float(oracle, "temporal_spearman"),
+        "kendall_tau_b": _float(oracle, "temporal_kendall_tau_b"),
+    }
+    for statistic, target in temporal_expected.items():
+        require(math.isclose(oracle_values[statistic], target, rel_tol=0.0, abs_tol=1e-12),
+                "saved Phase-H same-type oracle association changed: " + statistic)
+    audit["temporal_same_type_oracle"] = {
+        "saved_phase_h_same_type_oracle": oracle_values, "verified_unchanged": True,
+    }
+    audit["verified"] = True
+    return audit
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    output_root = Path(args.phase_h_dir)
+    phase_h_root = Path(args.phase_h_dir)
+    output_root = Path(args.output_dir)
     manifest_path = Path(args.n9_manifest)
-    unit_path = output_root / "task041_phase_h_unit_temporal_winrate.csv"
-    span_path = output_root / "task041_phase_h_per_span_winrate.csv"
-    old_compare_path = output_root / "task041_phase_h_original_vs_temporal.csv"
-    subset_path = output_root / "task041_phase_h_subset_stability.csv"
-    old_summary_path = output_root / "task041_phase_h_summary.json"
+    unit_path = phase_h_root / "task041_phase_h_unit_temporal_winrate.csv"
+    span_path = phase_h_root / "task041_phase_h_per_span_winrate.csv"
+    old_compare_path = phase_h_root / "task041_phase_h_original_vs_temporal.csv"
+    subset_path = phase_h_root / "task041_phase_h_subset_stability.csv"
+    old_summary_path = phase_h_root / "task041_phase_h_summary.json"
+    baseline_comparison_path = phase_h_root / "task041_phase_h_baseline_comparison.csv"
+    same_type_oracle_path = phase_h_root / "task041_phase_h_same_type_oracle.csv"
+    phase_h_report_path = phase_h_root / "task041_phase_h_report.md"
     for path in (unit_path, span_path, old_compare_path, subset_path,
-                 old_summary_path, manifest_path):
+                 old_summary_path, baseline_comparison_path,
+                 same_type_oracle_path, phase_h_report_path, manifest_path):
         require(path.is_file(), "missing frozen Phase-H/G input: " + str(path))
-    for filename in H1_FILES:
-        require(not (output_root / filename).exists(),
-                "refusing to overwrite existing Phase-H.1 output: " + filename)
+    require(output_root.resolve() != phase_h_root.resolve(),
+            "Phase-H.1 output must be separate from read-only Phase-H inputs")
+    require(not output_root.exists(),
+            "refusing to overwrite existing Phase-H.1 output directory: " + str(output_root))
 
     repo = Path(__file__).resolve().parents[2]
     branch = phase_h.git_value(repo, "rev-parse", "--abbrev-ref", "HEAD")
@@ -308,9 +420,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     units = phase_h.read_csv(unit_path)
     spans = phase_h.read_csv(span_path)
     old_compare = phase_h.read_csv(old_compare_path)
+    baseline_comparison = phase_h.read_csv(baseline_comparison_path)
+    same_type_oracle = phase_h.read_csv(same_type_oracle_path)
     subsets = phase_h.read_csv(subset_path)
     manifest = phase_h.read_csv(manifest_path)
     previous_summary = json.loads(old_summary_path.read_text(encoding="utf-8"))
+    previous_report = phase_h_report_path.read_text(encoding="utf-8")
+    legacy_report_claims = _legacy_safest_report_claims(previous_report)
     require(len(units) == 29, "Phase-H table must contain exactly the frozen 29 units")
     by_uid: dict[str, Mapping[str, Any]] = {}
     by_domain: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
@@ -563,6 +679,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     original_summary = _same_type_summary([method_rows[(domain, "R_original")] for domain in SAME_TYPE])
     temporal_summary = _same_type_summary([method_rows[(domain, "R_temporal")] for domain in SAME_TYPE])
+    frozen_rank_association_audit = _verify_frozen_rank_associations(
+        original_summary, temporal_summary, baseline_comparison, same_type_oracle
+    )
     original_gate_stats = {
         "spearman": original_summary["spearman"],
         "kendall": original_summary["kendall"],
@@ -575,6 +694,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     }
     predeclared_decision, predeclared_gate = phase_h.temporal_decision_gate(
         temporal_gate_stats, original_gate_stats
+    )
+    require(
+        previous_summary.get("decision") == predeclared_decision
+        == "TEMPORAL_STRESS_SELECTION_PROMISING",
+        "corrected safest semantics changed the completed Phase-H gate",
     )
     if not same_type_changes or not same_type_corrected:
         top1_decision = "NO_DEMONSTRATED_TOP1_SELECTION_VALUE"
@@ -592,11 +716,34 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     class_coverage_rows, class_coverage_summary = _validate_class_coverage(manifest, subsets)
     all_domain_rows = [row for row in corrected_rows if row["row_type"] == "domain"]
+    exact_order_equal_domain_count = similarity_rows[-1]["exact_full_order_equal_domain_count"]
+    top1_decision, top1_rationale = top1_value_decision(
+        len(same_type_changes), len(same_type_corrected),
+        len(same_type_regressed), exact_order_equal_domain_count,
+        len(SAME_TYPE),
+    )
     stale_domain_values = [row for row in all_domain_rows
                            if row["legacy_phase_h_safest_matches_corrected"] is False]
+    same_type_safest_rows = [
+        row for row in safest_rows
+        if row.get("row_type") == "domain"
+    ]
+    span_winner_summary = [{
+        "domain_id": row["domain_id"],
+        "per_span_safest_task037_global_index": json.loads(row["per_span_safest_uids_json"]),
+        "aggregate_temporal_safest_task037_global_index": row["temporal_safest_task037_global_index"],
+        "fullval_safest_task037_global_index": row["fullval_safest_task037_global_index"],
+    } for row in same_type_safest_rows]
+    span_variability_domains = [
+        row["domain_id"] for row in span_winner_summary
+        if len(set(row["per_span_safest_task037_global_index"].values())) > 1
+    ]
     summary = {
         "task": "Task041 Phase H.1 safest-semantics repair and incremental-value audit",
         "branch": branch,
+        "output_directory": str(output_root.resolve()),
+        "source_code_sha256": phase_h.sha256_file(Path(__file__)),
+        "code_worktree_dirty_when_generated": bool(phase_h.git_value(repo, "status", "--porcelain")),
         "code_head": phase_h.git_value(repo, "rev-parse", "HEAD"),
         "phase_h_predeclared_decision": previous_summary.get("decision"),
         "predeclared_gate_after_safest_semantics_correction": predeclared_decision,
@@ -604,8 +751,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "R_temporal": temporal_gate_stats, "R_original": original_gate_stats,
         },
         "predeclared_gate_details": predeclared_gate,
+        "predeclared_phase_h_gate": predeclared_decision,
+        "predeclared_phase_h_gate_decision_preserved": (
+            predeclared_decision == previous_summary.get("decision")
+        ),
+        "frozen_rank_association_audit": frozen_rank_association_audit,
+        "phase_h_historical_report_safest_accuracy_claims": legacy_report_claims,
         "scientific_top1_value": top1_decision,
         "scientific_top1_value_rationale": top1_rationale,
+        "scientific_top1_selection_value": top1_decision,
+        "final_decisions": {
+            "PREDECLARED_PHASE_H_GATE": predeclared_decision,
+            "SCIENTIFIC_TOP1_SELECTION_VALUE": top1_decision,
+        },
         "same_type_safest_identity_accuracy": {
             "R_original": original_summary["safest_accuracy"],
             "R_temporal": temporal_summary["safest_accuracy"],
@@ -631,6 +789,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "domain_count": len(SAME_TYPE),
         },
         "same_type_per_span_summary": [row for row in per_span_rows if row["row_type"] == "domain_balanced"],
+        "same_type_per_span_safest_winners": span_winner_summary,
+        "same_type_domains_with_safest_identity_variation_across_spans": span_variability_domains,
+        "only_expected_domains_103_113_vary_across_spans": span_variability_domains == ["103", "113"],
         "span_correct_but_overall_temporal_wrong": [
             {"span": row["span"], "domain_id": row["domain_id"],
              "span_safest_uid": row["span_safest_task037_global_index"],
@@ -655,7 +816,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "phase_h_inputs": {
             path.name: {"path": str(path), "sha256": phase_h.sha256_file(path)}
             for path in (unit_path, span_path, old_compare_path, subset_path,
-                         old_summary_path, manifest_path)
+                         old_summary_path, baseline_comparison_path,
+                         same_type_oracle_path, phase_h_report_path, manifest_path)
         },
         "gpu_used": False, "inference_rerun": False,
         "full_validation_oracle_rerun": False,
@@ -669,6 +831,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     report = _report(summary, corrected_rows, safest_rows, harmful_rows,
                      similarity_rows, per_span_rows, class_coverage_rows)
 
+    output_root.mkdir(parents=True, exist_ok=False)
     phase_h.write_csv_new(output_root / H1_FILES[0], corrected_rows)
     phase_h.write_csv_new(output_root / H1_FILES[1], safest_rows)
     phase_h.write_csv_new(output_root / H1_FILES[2], harmful_rows)
@@ -680,6 +843,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         handle.write(report)
     require({filename for filename in H1_FILES if (output_root / filename).is_file()} == set(H1_FILES),
             "Phase-H.1 did not create exactly its eight new artifacts")
+    require({path.name for path in output_root.iterdir()} == set(H1_FILES),
+            "Phase-H.1 output directory does not contain exactly eight artifacts")
     print("[Task041 Phase H.1] %s; top1=%s; output=%s" %
           (predeclared_decision, top1_decision, output_root), flush=True)
     return summary
@@ -707,6 +872,7 @@ def _report(summary: Mapping[str, Any], corrected_rows: Sequence[Mapping[str, An
         "",
         "- Phase-H recorded decision: `%s`." % summary["phase_h_predeclared_decision"],
         "- Recomputed predeclared gate with corrected safest semantics: `%s`." % summary["predeclared_gate_after_safest_semantics_correction"],
+        "- The original numerical Phase-H gate and its criteria were unchanged; it still passes.",
         "- Corrected same-type safest accuracy: original %.3f (%d/7); temporal %.3f (%d/7)." % (
             summary["same_type_safest_identity_accuracy"]["R_original"],
             summary["same_type_safest_correct_count"]["R_original"],
@@ -737,6 +903,14 @@ def _report(summary: Mapping[str, Any], corrected_rows: Sequence[Mapping[str, An
         "",
         "Correction domains: %s." % ", ".join(row["domain_id"] for row in summary["same_type_temporal_corrections"]) or "none",
         "Regression domains: %s." % ", ".join(row["domain_id"] for row in summary["same_type_temporal_regressions"]) or "none",
+        "",
+        "## Frozen Phase-H rank-association verification",
+        "Original rho=%s, tau-b=%s; temporal rho=%s, tau-b=%s."
+        % (_fmt(summary["frozen_rank_association_audit"]["R_original"]["recomputed_from_frozen_unit_records"]["spearman"]),
+           _fmt(summary["frozen_rank_association_audit"]["R_original"]["recomputed_from_frozen_unit_records"]["kendall_tau_b"]),
+           _fmt(summary["frozen_rank_association_audit"]["R_temporal"]["recomputed_from_frozen_unit_records"]["spearman"]),
+           _fmt(summary["frozen_rank_association_audit"]["R_temporal"]["recomputed_from_frozen_unit_records"]["kendall_tau_b"])),
+        "These match the saved baseline CSV and same-type oracle; no score was changed.",
         "",
         "## Most-harmful identity audit (same-type primary)",
         "",
@@ -783,6 +957,26 @@ def _report(summary: Mapping[str, Any], corrected_rows: Sequence[Mapping[str, An
     exceptions = summary["span_correct_but_overall_temporal_wrong"]
     lines.extend([
         "",
+        "### Per-domain safest identity by temporal span",
+        "",
+        "| Domain | span1 | span2 | span4 | span8 | span16 | aggregate | full-val |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+    for row in summary["same_type_per_span_safest_winners"]:
+        by_span = row["per_span_safest_task037_global_index"]
+        lines.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % (
+            row["domain_id"], by_span["1"], by_span["2"], by_span["4"],
+            by_span["8"], by_span["16"],
+            row["aggregate_temporal_safest_task037_global_index"],
+            row["fullval_safest_task037_global_index"],
+        ))
+    lines.append(
+        "Span winners vary in: %s." % (
+            ", ".join(summary["same_type_domains_with_safest_identity_variation_across_spans"]) or "none"
+        )
+    )
+    lines.extend([
+        "",
         "Span-specific safest matches where aggregate temporal ranking is wrong: %s." % (
             "; ".join("domain %s/span %s (span=%s, aggregate=%s)" % (
                 row["domain_id"], row["span"], row["span_safest_uid"], row["overall_temporal_safest_uid"]
@@ -814,17 +1008,21 @@ def _report(summary: Mapping[str, Any], corrected_rows: Sequence[Mapping[str, An
     return "\n".join(lines)
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Offline Task041 Phase-H.1 audit")
     parser.add_argument(
         "--phase-h-dir", default=phase_h.OUTPUT_DEFAULT,
-        help="existing Phase-H output directory; new H.1 files are written here without overwriting H files",
+        help="read-only source directory for completed Phase-H artifacts",
+    )
+    parser.add_argument(
+        "--output-dir", default=H1_OUTPUT_DEFAULT,
+        help="new, separate directory for the eight Phase-H.1 artifacts",
     )
     parser.add_argument(
         "--n9-manifest",
         default=str(phase_h.PHASEG_OUT / "task041_phase_g_n9_video_manifest.csv"),
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 if __name__ == "__main__":

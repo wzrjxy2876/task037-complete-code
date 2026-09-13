@@ -52,6 +52,57 @@ class SafestAndHarmfulSemanticsTests(unittest.TestCase):
         self.assertEqual(phase_h1._risk_order(rows, "W"), ["3", "2", "12"])
 
 
+
+class H1DecisionAndProvenanceTests(unittest.TestCase):
+    def test_zero_top1_change_with_order_change_uses_required_statement(self):
+        decision, rationale = phase_h1.top1_value_decision(0, 0, 0, 5, 7)
+        self.assertEqual(decision, "NO_DEMONSTRATED_TOP1_SELECTION_VALUE")
+        self.assertEqual(rationale, phase_h1.NO_TOP1_SELECTION_VALUE_STATEMENT)
+        self.assertEqual(
+            rationale,
+            "Temporal stress changes intra-domain rank structure but provides no incremental top-1 pruning-candidate selection value on the current same-type cohort.",
+        )
+
+    def test_unchanged_full_order_does_not_claim_rank_structure_changed(self):
+        decision, rationale = phase_h1.top1_value_decision(0, 0, 0, 7, 7)
+        self.assertEqual(decision, "NO_DEMONSTRATED_TOP1_SELECTION_VALUE")
+        self.assertNotEqual(rationale, phase_h1.NO_TOP1_SELECTION_VALUE_STATEMENT)
+
+    def test_phase_h_rank_associations_are_checked_against_saved_artifacts(self):
+        original = phase_h1.EXPECTED_FROZEN_RANK_ASSOCIATIONS["R_original"]
+        temporal = phase_h1.EXPECTED_FROZEN_RANK_ASSOCIATIONS["R_temporal"]
+        baseline = [
+            {"row_type": "domain_balanced", "scope": "same_type", "method": method,
+             "spearman": str(values["spearman"]),
+             "kendall_tau_b": str(values["kendall_tau_b"])}
+            for method, values in (("R_original", original), ("R_temporal", temporal))
+        ]
+        oracle = [{
+            "row_type": "domain_balanced", "domain_id": "ALL", "scope": "same_type",
+            "temporal_spearman": str(temporal["spearman"]),
+            "temporal_kendall_tau_b": str(temporal["kendall_tau_b"]),
+        }]
+        audit = phase_h1._verify_frozen_rank_associations(
+            {"spearman": original["spearman"], "kendall": original["kendall_tau_b"]},
+            {"spearman": temporal["spearman"], "kendall": temporal["kendall_tau_b"]},
+            baseline, oracle,
+        )
+        self.assertTrue(audit["verified"])
+
+    def test_historical_report_claims_are_parsed_not_assumed(self):
+        report = "\n".join((
+            "| Original-only | -0.14 | -0.09 | 0.5714285714285714 | 2/5/0 |",
+            "| Temporal stress | 0.07 | 0.04 | 0.2857142857142857 | 4/3/0 |",
+        ))
+        claims = phase_h1._legacy_safest_report_claims(report)
+        self.assertEqual(claims["Original-only"]["low_high_correct_reverse_tie"], "2/5/0")
+        self.assertEqual(claims["Temporal stress"]["low_high_correct_reverse_tie"], "4/3/0")
+
+    def test_output_default_is_separate_from_read_only_phase_h(self):
+        args = phase_h1.parse_args([])
+        self.assertEqual(args.output_dir, phase_h1.H1_OUTPUT_DEFAULT)
+        self.assertNotEqual(args.output_dir, args.phase_h_dir)
+
 class FrozenClassPoolTests(unittest.TestCase):
     def test_n3_n6_n9_members_all_stay_inside_one_frozen_three_class_pool(self):
         manifest = [

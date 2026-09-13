@@ -16,7 +16,7 @@ The frozen descriptor coordinates, BMS assignments and sigma, model architecture
 
 The 32 sampled temporal positions use Task040's fixed-cardinality enumerator at spans `{1, 2, 4, 8, 16}`. At each span there are 16 deterministic pairs, and each condition swaps exactly two positions. Every video has one baseline forward and 80 intervened forwards.
 
-For attention head `i`, `H_i(X)` is that head's `attention_weights @ V` output before head concatenation and output projection. The read-only capture uses the attention-dropout output as the weights; in `model.eval()` dropout is the identity. For FFN neuron `i`, `H_i(X)` is the module activation output after `fc1` and GELU and before `fc2`.
+For attention head `i`, `H_i(X)` is that head's `attention_weights @ V` output before head concatenation and output projection. The read-only capture uses the attention-dropout output as the weights; in `model.eval()` dropout is the identity. For FFN neuron `i`, `H_i(X)` is the module activation output after `fc1` and GELU and before `fc2`. The capture retains the model's full token axes (for example, batch × time × height × width × hidden width) and reports those axes instead of flattening or remapping them.
 
 For video `v` and condition `q`:
 

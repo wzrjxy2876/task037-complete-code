@@ -134,6 +134,22 @@ class Task042Tests(unittest.TestCase):
         self.assertEqual(tuple(capture.values[77].shape), (2, 6))
         capture.close()
 
+    def test_ffn_capture_retains_spatiotemporal_token_axes(self):
+        torch.manual_seed(19)
+        model = TinyMlp().eval()
+        units = [{"layer": "", "capture_kind": "neuron", "unit_index": 2,
+                  "task037_global_index": 88}]
+        capture = t42.ActivationCapture(model, units, torch)
+        x = torch.randn(1, 2, 3, 4, 4)
+        with torch.inference_mode():
+            _ = model(x)
+        expected = model.act(model.fc1(x))[..., 2]
+        self.assertTrue(torch.allclose(capture.values[88], expected, atol=1e-7, rtol=1e-6))
+        self.assertEqual(tuple(capture.values[88].shape), (1, 2, 3, 4))
+        self.assertEqual(capture.structure[""]["activation_token_axes"], (2, 3, 4))
+        self.assertEqual(capture.structure[""]["token_count"], 24)
+        capture.close()
+
     def test_all_51_frozen_unit_identities_join_exactly(self):
         fixture_path = ROOT / "data" / "task042_unit_identity_fixture.csv"
         with fixture_path.open("r", encoding="utf-8-sig", newline="") as f:

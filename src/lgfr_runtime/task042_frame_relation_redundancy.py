@@ -457,7 +457,7 @@ class ActivationCapture:
             qkv_cache["shape"] = (nwin, heads, tokens, head_dim)
             self.structure.setdefault(layer, {}).update({
                 "num_heads": heads, "head_dim": head_dim, "window_count": nwin,
-                "token_count": tokens,
+                "token_count": tokens, "activation_token_axes": (tokens,),
                 "qkv_projection_shape": tuple(int(d) for d in output.shape),
             })
         def weights_hook(_module: Any, _inputs: Any, output: Any) -> None:
@@ -488,11 +488,22 @@ class ActivationCapture:
         neuron_indices = {norm_int(r["unit_index"]): r for r in target_rows}
         require(all(0 <= i < hidden for i in neuron_indices), "frozen FFN neuron index exceeds hidden width")
         def act_hook(_module: Any, _inputs: Any, output: Any) -> None:
-            require(output.ndim == 3 and int(output.shape[-1]) == hidden,
-                    "unexpected post-GELU FFN tensor shape in " + layer)
+            require(output.ndim >= 2 and int(output.shape[-1]) == hidden,
+                    "unexpected post-GELU FFN tensor shape in %s: observed=%s hidden=%d" %
+                    (layer, tuple(int(d) for d in output.shape), hidden))
+            if output.ndim == 2:
+                token_axes = (int(output.shape[0]),)
+                outer_count = ""
+                token_count = int(output.shape[0])
+            else:
+                token_axes = tuple(int(d) for d in output.shape[1:-1])
+                outer_count = int(output.shape[0]) if output.ndim == 3 else ""
+                token_count = 1
+                for dim in token_axes:
+                    token_count *= dim
             self.structure.setdefault(layer, {}).update({
-                "hidden_width": hidden, "window_count": int(output.shape[0]),
-                "token_count": int(output.shape[-2]),
+                "hidden_width": hidden, "window_count": outer_count,
+                "token_count": token_count, "activation_token_axes": token_axes,
                 "ffn_activation_shape": tuple(int(d) for d in output.shape),
             })
             for i, row in neuron_indices.items():
@@ -862,6 +873,7 @@ def worker(args: argparse.Namespace) -> None:
                             "hidden_width": structure.get("hidden_width", ""),
                             "window_count": structure.get("window_count", ""),
                             "token_count": structure.get("token_count", ""),
+                            "activation_token_axes": json.dumps(list(structure.get("activation_token_axes", ())), separators=(",", ":")),
                             "activation_tensor_shape": json.dumps(list(baseline_shapes[uid]), separators=(",", ":")),
                             "layer_capture_tensor_shape": json.dumps(list(structure["head_output_shape" if is_head else "ffn_activation_shape"]), separators=(",", ":")),
                             "qkv_projection_shape": json.dumps(list(structure["qkv_projection_shape"]), separators=(",", ":")) if is_head else "",
@@ -881,7 +893,7 @@ def worker(args: argparse.Namespace) -> None:
     write_csv(output / ("task042_gpu%d_activation_shape_audit.csv" % gpu), shape_audit_rows,
               ("task037_global_index", "layer", "unit_type", "unit_index", "stage", "domain_id", "capture_kind",
                "num_heads", "head_dim", "hidden_width", "window_count", "token_count", "activation_tensor_shape",
-               "layer_capture_tensor_shape", "qkv_projection_shape", "attention_weights_shape",
+               "activation_token_axes", "layer_capture_tensor_shape", "qkv_projection_shape", "attention_weights_shape",
                "baseline_intervention_shape_equal", "shape_audit_video_index", "physical_gpu"))
     write_json(done, {"worker": gpu, "physical_gpu": gpu, "video_indices": sorted(seen),
                       "unit_count": len(units), "row_count": len(assigned) * 80 * 51,
@@ -1021,7 +1033,7 @@ def finalize(args: argparse.Namespace) -> None:
             uid = norm_int(row["task037_global_index"])
             if uid in shape_by_uid:
                 require(all(shape_by_uid[uid][k] == row[k] for k in ("num_heads", "head_dim", "hidden_width",
-                    "window_count", "token_count", "activation_tensor_shape", "layer_capture_tensor_shape",
+                    "window_count", "token_count", "activation_token_axes", "activation_tensor_shape", "layer_capture_tensor_shape",
                     "qkv_projection_shape", "attention_weights_shape")),
                         "GPU0/GPU1 observed activation shape identity mismatch")
             else:
@@ -1030,7 +1042,7 @@ def finalize(args: argparse.Namespace) -> None:
     write_csv(output / "task042_activation_shape_audit.csv", [shape_by_uid[u] for u in sorted(shape_by_uid)],
               ("task037_global_index", "layer", "unit_type", "unit_index", "stage", "domain_id", "capture_kind",
                "num_heads", "head_dim", "hidden_width", "window_count", "token_count", "activation_tensor_shape",
-               "layer_capture_tensor_shape", "qkv_projection_shape", "attention_weights_shape",
+               "activation_token_axes", "layer_capture_tensor_shape", "qkv_projection_shape", "attention_weights_shape",
                "baseline_intervention_shape_equal", "shape_audit_video_index", "physical_gpu"))
 
     pair_map = _aggregate_pair_distances({}, units, by_video_unit)

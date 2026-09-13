@@ -558,7 +558,9 @@ def run_model(args: argparse.Namespace) -> dict[str, Any]:
 
     entries = _data_entries(annotation, args.videos_per_class, args.max_videos)
     output_dir = Path(args.output_root) / args.run_id / args.model / "evaluation"
-    output_dir.mkdir(parents=True, exist_ok=False)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if (output_dir / "summary.json").exists():
+        raise FileExistsError("completed model output already exists: " + str(output_dir))
     rows: list[dict[str, Any]] = []
     cache: dict[str, dict[str, dict[str, Any]]] = {}
     start_time = time.time()
@@ -665,13 +667,28 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         if not path.is_file():
             raise FileNotFoundError("missing model summary: " + str(path))
         summaries[model_name] = json.loads(path.read_text(encoding="utf-8"))
+        audit_path = root / model_name / "preflight.json"
+        if audit_path.is_file():
+            audit_result = json.loads(audit_path.read_text(encoding="utf-8"))
+            summaries[model_name]["prune_checkpoint_audit"] = audit_result.get("existing_prune_checkpoint", {})
+    prune_agreement = {
+        name: summaries[name]["variants"]["existing_prune"]["clean_prediction_agreement_with_dense"]
+        for name in ("mamba", "slowfast", "swin")
+    }
+    all_low_agreement = all(value < 0.2 for value in prune_agreement.values())
+    agreement_text = ", ".join("%s %.3f" % (name, value) for name, value in prune_agreement.items())
     comparison = {
         "task": "Task042 Phase A.1 cross-model exploratory temporal relation analysis",
+        "screening_readout": "NOT_DECISIVE_PREDICTION_COLLAPSE_WITH_RELATION_CHANGE" if all_low_agreement else "PILOT_REQUIRES_MANUAL_READOUT",
+        "all_existing_prune_variants_have_low_dense_prediction_agreement": all_low_agreement,
+        "scientific_claim_supported": False,
         "models": summaries,
         "interpretation_limitations": [
             "The existing pruned masks have different target rates and were produced by model-specific code.",
             "This is a pilot on one deterministic validation video per action class unless sample size is overridden.",
-            "No matched 30% measured FLOPs, physical speedup, or fine-tuning claim is made.",
+            "The pruning selections were applied without fine-tuning; low clip-level accuracy/agreement makes the relation changes non-diagnostic for accuracy-preserving pruning.",
+            "For SlowFast, the saved pruning checkpoint metadata reports a trained score, but this evaluation applies only its masks to the separately supplied dense teacher weights.",
+            "No matched 30% measured FLOPs or physical speedup claim is made.",
             "The magnitude control matches each existing selection's per-module kept-unit counts; it is not a matched global FLOPs control.",
         ],
     }
@@ -679,16 +696,29 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     lines = [
         "# Task042 Phase A.1 — Temporal-relation collapse pilot", "",
         "This exploratory run compares each dense checkpoint with a per-module magnitude control and the existing structured-pruning selection on the same 32-frame UCF101 validation clips.",
-        "", "| Model | Videos | Dense Top-1 | Magnitude TRR | Existing-prune TRR | Existing-prune TRC | Existing-prune temporal JS (reverse) | Mask kept fraction |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "", "## Accuracy and prediction agreement", "",
+        "| Model | Videos | Dense Top-1 | Magnitude Top-1 | Existing-prune Top-1 | Existing-prune agreement with Dense |",
+        "|---|---:|---:|---:|---:|---:|",
     ]
     for model_name, summary in summaries.items():
         dense = summary["variants"]["dense"]
         mag = summary["variants"]["magnitude"]
         pruned = summary["variants"]["existing_prune"]
-        lines.append("| %s | %d | %.4f | %.4f | %.4f | %.4f | %.6f | %.4f |" % (
+        lines.append("| %s | %d | %.4f | %.4f | %.4f | %.4f |" % (
             model_name, summary["video_count"], dense["clean_top1_accuracy"],
-            mag["clean_relation_retention_trr"], pruned["clean_relation_retention_trr"],
+            mag["clean_top1_accuracy"], pruned["clean_top1_accuracy"],
+            pruned["clean_prediction_agreement_with_dense"],
+        ))
+    lines.extend([
+        "", "## Multi-frame relation metrics", "",
+        "| Model | Magnitude TRR | Existing-prune TRR | Existing-prune TRC | Existing-prune temporal JS (reverse) | Mask kept fraction |",
+        "|---|---:|---:|---:|---:|---:|",
+    ])
+    for model_name, summary in summaries.items():
+        mag = summary["variants"]["magnitude"]
+        pruned = summary["variants"]["existing_prune"]
+        lines.append("| %s | %.4f | %.4f | %.4f | %.6f | %.4f |" % (
+            model_name, mag["clean_relation_retention_trr"], pruned["clean_relation_retention_trr"],
             pruned["clean_relation_collapse_trc"],
             pruned["mean_temporal_js_bits_by_condition"]["reverse"],
             summary["pruning"].get("mask_kept_fraction", float("nan")),
@@ -696,7 +726,9 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     lines.extend([
         "", "## Readout", "",
         "TRR is the cosine similarity between the upper-triangular entries of the dense and pruned multi-frame relation matrices. TRC is `1 - TRR`. Temporal JS measures the prediction-distribution change between clean and perturbed clips.",
-        "", "These values are a screening result. The existing pruning rates differ by architecture, and the saved implementations do not establish a matched physical FLOPs reduction. Do not use this table as a final cross-model superiority claim. The next controlled run should regenerate all masks at a predeclared, measured FLOPs target and then evaluate the full validation split.",
+        "", "The existing-prune agreement with Dense is " + agreement_text + ". These low agreement and clean-accuracy values indicate broad prediction collapse in this screen. The lower TRR therefore cannot be attributed specifically to temporal-relation damage while preserving clip-level behavior. This pilot does not support a scientific claim that current pruning uniquely overlooks temporal relations.",
+        "", "The SlowFast pruning checkpoint records a trained top-1 of 85.99%, but this run applies only its saved masks to the separately supplied dense teacher weights. Its run accuracy is not the accuracy of that fine-tuned artifact. Mamba and Swin selections are also evaluated without fine-tuning.",
+        "", "The existing pruning rates differ by architecture, and the saved implementations do not establish a matched physical FLOPs reduction. This pilot uses one deterministic validation video per class (101 total), not the full validation split. The next controlled run should compare fine-tuned pruning candidates and accuracy-matched controls at a predeclared measured-FLOPs target, then evaluate the full split.",
         "", "Per-video observations are in each model's `per_video_results.csv`; complete settings and hashes are in the three model `summary.json` files.",
     ])
     (root / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

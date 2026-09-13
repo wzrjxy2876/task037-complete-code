@@ -95,3 +95,9 @@ remains relatively high. A positive screening signal must be followed by a
 controlled run that regenerates all pruning masks at a predeclared, measured
 FLOPs target and evaluates the full validation split before proposing a new
 selector.
+
+If the pruning and magnitude variants both lose most of their clean accuracy
+or agreement with Dense, treat lower TRR as indeterminate: it does not isolate
+temporal-relation damage from broad representation/prediction collapse. This
+pilot applies saved selections without fine-tuning and is not a substitute for
+an accuracy-matched comparison.

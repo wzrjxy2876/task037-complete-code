@@ -383,8 +383,9 @@ def cliffs_delta(a: Sequence[float], b: Sequence[float]) -> Optional[float]:
     less = greater = 0
     import bisect
     for x in a:
-        less += bisect.bisect_left(sb, float(x))
-        greater += len(sb) - bisect.bisect_right(sb, float(x))
+        # b < x contributes to P(a>b); b > x contributes to P(a<b).
+        greater += bisect.bisect_left(sb, float(x))
+        less += len(sb) - bisect.bisect_right(sb, float(x))
     return (greater - less) / float(len(a) * len(b))
 
 

@@ -234,6 +234,11 @@ class Task042Tests(unittest.TestCase):
         self.assertAlmostEqual(t42.relation_distance(a, b), t42.relation_distance(b, a))
         self.assertEqual(t42.relation_distance(a, a), 0.0)
 
+    def test_cliffs_delta_sign_matches_group_ordering(self):
+        self.assertEqual(t42.cliffs_delta([1.0, 2.0], [3.0, 4.0]), -1.0)
+        self.assertEqual(t42.cliffs_delta([3.0, 4.0], [1.0, 2.0]), 1.0)
+        self.assertEqual(t42.cliffs_delta([1.0, 2.0], [1.0, 2.0]), 0.0)
+
     def test_nearest_neighbor_ties_break_by_smallest_task037_index(self):
         distances = {(10, 20): 0.25, (10, 15): 0.25, (10, 30): 0.4}
         self.assertEqual(t42.nearest_neighbor([10, 15, 20, 30], distances, 10), (15, 0.25))

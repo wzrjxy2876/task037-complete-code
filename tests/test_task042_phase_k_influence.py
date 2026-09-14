@@ -107,6 +107,21 @@ class PhaseKInfluenceTests(unittest.TestCase):
         self.assertAlmostEqual(absolute, 0.6)
         self.assertAlmostEqual(relative, 0.6)
 
+    def test_cuda_event_elapsed_time_uses_start_then_end(self):
+        class Event:
+            def __init__(self, milliseconds):
+                self.milliseconds = milliseconds
+            def elapsed_time(self, other):
+                return other.milliseconds - self.milliseconds
+        class Cuda:
+            @staticmethod
+            def synchronize():
+                return None
+        class FakeTorch:
+            cuda = Cuda()
+        seconds = phase_k._event_seconds(FakeTorch, [{"start": Event(100.), "end": Event(142.5)}])
+        self.assertAlmostEqual(seconds, 0.0425)
+
     def test_simplex_weights_and_leave_one_out_residual_identity(self):
         target = np.array([1., 0., 0.])
         competitors = np.array([[0., 1., 0.], [0., 0., 1.]])

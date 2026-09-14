@@ -535,7 +535,7 @@ def _event_seconds(torch: Any, events: Sequence[Mapping[str, Any]]) -> float:
     if not events:
         return 0.0
     torch.cuda.synchronize()
-    return float(sum(float(item["end"].elapsed_time(item["start"])) for item in events) / 1000.0)
+    return float(sum(float(item["start"].elapsed_time(item["end"])) for item in events) / 1000.0)
 
 
 def _video_identity_map(config: Mapping[str, Any]) -> dict[int, dict[str, Any]]:

@@ -323,7 +323,7 @@ def _write_report(path: Path, summary: Mapping[str, Any]) -> None:
         "",
         f"Across all domains, {counts['singleton_atoms']:,}/{counts['atoms']:,} atoms ({summary['global_owner_degeneracy']['singleton_fraction']:.3f}) have a singleton exact argmax owner; {counts['multi_owner_atoms']:,} atoms have multiple exactly tied owners. Mean/median/maximum owner-set size are {summary['global_owner_degeneracy']['mean_owner_set_size']:.3f}/{summary['global_owner_degeneracy']['median_owner_set_size']:.1f}/{summary['global_owner_degeneracy']['maximum_owner_set_size']}.",
         "",
-        "These ties are exact float64 equality only; no epsilon was used. Singleton argmaxes are expected under continuous-valued scores, so the redundancy and calibration-stability tables—not argmax existence alone—determine whether the coverage structure is useful. The unit ownership concentration and cross-class same-owner fractions are in the degeneracy CSV.",
+        "These ties are exact float64 equality only; no epsilon was used. At 91.5%, owner sets are almost always singletons. Under a continuous-valued exact argmax this is the expected degeneracy, not evidence by itself of function specialization. The redundancy and calibration-stability tables—not argmax existence alone—determine whether the coverage structure is useful. The unit ownership concentration and cross-class same-owner fractions are in the degeneracy CSV.",
         "",
         "## Results by required question",
         "",

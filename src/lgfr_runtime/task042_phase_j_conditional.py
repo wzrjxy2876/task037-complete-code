@@ -807,6 +807,23 @@ def _derive_video_identities(video_rows: Sequence[Mapping[str, Any]], exact_vide
     return joined
 
 
+def _normalize_video_identity_order(video_rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    normalized = []
+    for row in video_rows:
+        require(all(key in row for key in ("video_index", "video_id", "label", "class_name", "class_position")),
+                "prepared frozen video identity is incomplete")
+        normalized.append({**dict(row), "video_index": int(row["video_index"]),
+                           "label": int(row["label"]), "class_position": int(row["class_position"])})
+    require(sorted(row["video_index"] for row in normalized) == list(range(30)),
+            "prepared video identity order is not exactly 30 indexed videos")
+    classes = {str(row["class_name"]) for row in normalized}
+    require(len(classes) == 10 and all(sum(str(row["class_name"]) == cls for row in normalized) == 3 for cls in classes),
+            "prepared video identity order is not 10 classes x 3 videos")
+    require(all({int(row["class_position"]) for row in normalized if str(row["class_name"]) == cls} == {1, 2, 3}
+                for cls in classes), "prepared within-class positions are not exactly 1, 2, 3")
+    return normalized
+
+
 def _prepare(repo: Path, base_root: Path, phase_root: Path) -> dict[str, Any]:
     require(not phase_root.exists(), "Phase-J output already exists; refusing overwrite")
     _, _, _ = _task042_runtime(repo)
@@ -1288,8 +1305,7 @@ def run(args: argparse.Namespace) -> None:
     units = [dict(r, capture_kind="head" if r["unit_type"] == "attention_head" else "neuron")
              for r in read_csv(Path(config["unit_manifest"])) if str(r["domain_id"]) in DOMAINS]
     units.sort(key=lambda r: (DOMAINS.index(str(r["domain_id"])), int(r["task037_global_index"])))
-    videos = [dict(r, video_index=int(r["video_index"]), label=int(r["label"]), class_position=int(r["class_position"]))
-              for r in read_csv(Path(config["video_manifest"]))]
+    videos = _normalize_video_identity_order(config["video_identity_order"])
     _write_outputs(phase_root, config, audit, units, videos, relations, numerical, t_count)
     finalize_outputs(phase_root, args.decision, args.decision_rationale)
     print("PHASE_J_COMPLETE units=%d videos=%d T=%d decision=%s" % (len(units), len(videos), t_count, args.decision), flush=True)

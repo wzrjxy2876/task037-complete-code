@@ -194,3 +194,17 @@ def test_video_identity_rejects_manifest_label_drift(tmp_path):
     manifest = [{"video_index": 0, "video_id": "/frames/ActionA/v_ActionA_g01_c01", "duration": "12", "label": "1"}]
     with pytest.raises(RuntimeError, match="label mismatch"):
         phase_j._derive_video_identities(manifest, exact)
+
+
+def test_prepared_video_order_preserves_frozen_class_position():
+    rows = []
+    for cls_index in range(10):
+        for position in range(1, 4):
+            i = len(rows)
+            name = "Action%02d" % cls_index
+            rows.append({"video_index": i, "video_id": "v_%s_g%02d_c01" % (name, position),
+                         "label": str(cls_index), "class_name": name, "class_position": position})
+    normalized = phase_j._normalize_video_identity_order(rows)
+    assert normalized[2]["class_position"] == 3
+    assert normalized[2]["label"] == 0
+    assert normalized[2]["class_name"] == "Action00"

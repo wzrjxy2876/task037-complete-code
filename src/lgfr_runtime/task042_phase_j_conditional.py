@@ -758,6 +758,55 @@ def _task042_runtime(repo: Path) -> tuple[Any, Any, Any]:
     return base, phase_i, base._runtime_modules(repo)[2]
 
 
+def _derive_video_identities(video_rows: Sequence[Mapping[str, Any]], exact_video_list: Path) -> list[dict[str, Any]]:
+    """Join class/position identity from the frozen authoritative video list.
+
+    The Task042 video manifest intentionally stores only video path, duration,
+    and numeric label. The exact list is the canonical ordering and contains
+    the UCF class in each video stem; derive the within-class position from
+    that frozen order instead of inventing fields in the manifest.
+    """
+    exact_by_stem: dict[str, dict[str, Any]] = {}
+    class_counts: defaultdict[str, int] = defaultdict(int)
+    class_labels: dict[str, str] = {}
+    lines = [line.strip() for line in Path(exact_video_list).read_text(encoding="utf-8").splitlines() if line.strip()]
+    for line_number, line in enumerate(lines, start=1):
+        fields = line.split()
+        require(len(fields) == 3, "malformed exact Task042 video-list row %d" % line_number)
+        stem, duration, label = fields
+        match = re.fullmatch(r"v_(.+)_g\d+_c\d+", stem)
+        require(match is not None, "cannot derive UCF class from exact video id: " + stem)
+        class_name = match.group(1)
+        require(stem not in exact_by_stem, "duplicate video in exact Task042 video list: " + stem)
+        require(class_name not in class_labels or class_labels[class_name] == label,
+                "numeric label is inconsistent within exact-list class " + class_name)
+        class_labels[class_name] = label
+        class_counts[class_name] += 1
+        exact_by_stem[stem] = {
+            "duration": duration,
+            "label": label,
+            "class_name": class_name,
+            "class_position": class_counts[class_name],
+        }
+
+    require(len(video_rows) == len(exact_by_stem), "video manifest and exact Task042 list have different counts")
+    manifest_by_stem = {Path(str(row["video_id"])).name: row for row in video_rows}
+    require(len(manifest_by_stem) == len(video_rows), "duplicate basename in Task042 video manifest")
+    require(set(manifest_by_stem) == set(exact_by_stem), "video manifest differs from the exact Task042 video list")
+
+    joined: list[dict[str, Any]] = []
+    for row in video_rows:
+        stem = Path(str(row["video_id"])).name
+        exact = exact_by_stem[stem]
+        require(str(row["duration"]) == str(exact["duration"]), "duration mismatch for frozen video " + stem)
+        require(str(row["label"]) == str(exact["label"]), "label mismatch for frozen video " + stem)
+        require(Path(str(row["video_id"])).parent.name == exact["class_name"],
+                "video path class differs from exact-list identity for " + stem)
+        joined.append({**dict(row), "class_name": exact["class_name"],
+                       "class_position": exact["class_position"]})
+    return joined
+
+
 def _prepare(repo: Path, base_root: Path, phase_root: Path) -> dict[str, Any]:
     require(not phase_root.exists(), "Phase-J output already exists; refusing overwrite")
     _, _, _ = _task042_runtime(repo)
@@ -795,11 +844,13 @@ def _prepare(repo: Path, base_root: Path, phase_root: Path) -> dict[str, Any]:
                 "Task037 layer/stage identity mismatch for global index " + str(uid))
         require(uid in EXPECTED_DOMAIN_UNITS[str(row["domain_id"])],
                 "Task037 unit domain assignment differs from frozen selected-domain identity")
-    videos = read_csv(Path(cfg["video_manifest"]))
+    videos = _derive_video_identities(read_csv(Path(cfg["video_manifest"])), Path(cfg["exact_video_list"]))
     classes = {str(v["class_name"]) for v in videos}
     require(len(videos) == 30 and len(classes) == 10, "authoritative Task042 cohort must be 10 classes by 3 videos")
     require(all(sum(str(v["class_name"]) == cls for v in videos) == 3 for cls in classes), "cohort is not balanced 3 videos per class")
     require(all(str(v.get("class_position", "")) in ("1", "2", "3") for v in videos), "within-class position identity missing")
+    video_indices = [int(v["video_index"]) for v in videos]
+    require(sorted(video_indices) == list(range(30)), "video manifest indices are not exactly 0..29")
     phase_root.mkdir(parents=True)
     run_cfg = {
         "task": "TASK042 PHASE J — CONDITIONAL FRAME-RELATION DIAGNOSTIC ONLY",
@@ -819,6 +870,7 @@ def _prepare(repo: Path, base_root: Path, phase_root: Path) -> dict[str, Any]:
                          "descriptors": cfg["input_sha256"]["descriptors"],
                          "unit_mapping": cfg["input_sha256"]["unit_mapping"],
                          "val_list": cfg["input_sha256"]["val_list"],
+                         "exact_video_list": sha256_file(Path(cfg["exact_video_list"])),
                          "checkpoint": CHECKPOINT_SHA},
         "dtype": "float32", "amp": False, "mask_free": True,
         "oas": "analytic Oracle Approximating Shrinkage; observations=flattened feature components; variables=temporal positions",

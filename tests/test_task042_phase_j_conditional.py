@@ -165,3 +165,32 @@ def test_mask_free_analysis_identity():
     phase_j.validate_mask_free_identity([1, 2, 3], [3, 1, 2], mask_hooks_registered=False)
     with pytest.raises(RuntimeError):
         phase_j.validate_mask_free_identity([1], [1], mask_hooks_registered=True)
+
+
+def test_video_identity_is_derived_from_frozen_exact_list_order(tmp_path):
+    exact = tmp_path / "exact.txt"
+    exact.write_text(
+        "v_ActionA_g01_c01 12 0\n"
+        "v_ActionA_g02_c01 13 0\n"
+        "v_ActionB_g01_c02 14 1\n",
+        encoding="utf-8",
+    )
+    manifest = [
+        {"video_index": 0, "video_id": "/frames/ActionA/v_ActionA_g01_c01", "duration": "12", "label": "0"},
+        {"video_index": 1, "video_id": "/frames/ActionB/v_ActionB_g01_c02", "duration": "14", "label": "1"},
+        {"video_index": 2, "video_id": "/frames/ActionA/v_ActionA_g02_c01", "duration": "13", "label": "0"},
+    ]
+    rows = phase_j._derive_video_identities(manifest, exact)
+    by_stem = {Path(row["video_id"]).name: row for row in rows}
+    assert by_stem["v_ActionA_g01_c01"]["class_name"] == "ActionA"
+    assert by_stem["v_ActionA_g01_c01"]["class_position"] == 1
+    assert by_stem["v_ActionA_g02_c01"]["class_position"] == 2
+    assert by_stem["v_ActionB_g01_c02"]["class_position"] == 1
+
+
+def test_video_identity_rejects_manifest_label_drift(tmp_path):
+    exact = tmp_path / "exact.txt"
+    exact.write_text("v_ActionA_g01_c01 12 0\n", encoding="utf-8")
+    manifest = [{"video_index": 0, "video_id": "/frames/ActionA/v_ActionA_g01_c01", "duration": "12", "label": "1"}]
+    with pytest.raises(RuntimeError, match="label mismatch"):
+        phase_j._derive_video_identities(manifest, exact)

@@ -15,8 +15,17 @@ if [[ "$(git -C "$REPO" branch --show-current)" != "task_042_post_bms_frame_rela
   exit 2
 fi
 if [[ -e "$OUT" ]]; then
-  echo "Refusing to overwrite an existing Phase E.1 output directory: $OUT" >&2
-  exit 2
+  if [[ ! -f "$OUT/work/preflight.json" || ! -f "$OUT/task042_phase_e1_candidate_manifest.csv" ]]; then
+    echo "Refusing to reuse an output directory without a complete Phase E.1 preflight: $OUT" >&2
+    exit 2
+  fi
+  if find "$OUT/work" -maxdepth 1 -type f \( ! -name 'preflight.json' -a ! -name 'task042_phase_e1_exact_training_list.txt' \) | grep -q .; then
+    echo "Refusing to reuse an output directory that already contains worker results: $OUT" >&2
+    exit 2
+  fi
+  echo "Reusing the verified Phase E.1 preflight at $OUT"
+else
+  python "$SCRIPT" --phase prepare --repo "$REPO" --base "$BASE"
 fi
 source "/home/jixinye25/miniconda3/etc/profile.d/conda.sh"
 conda activate MC_Pruning
@@ -26,7 +35,6 @@ export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2
 
 python -m py_compile "$SCRIPT" "$REPO/tests/test_task042_phase_e1_progressive_pilot.py"
 python -m unittest discover -s tests -p 'test_task042_phase_e1_progressive_pilot.py' -v
-python "$SCRIPT" --phase prepare --repo "$REPO" --base "$BASE"
 mkdir -p "$OUT/work/logs"
 
 (

@@ -852,14 +852,31 @@ def analyze_phase_k(args: argparse.Namespace) -> None:
     for vi in range(30):
         video = videos[vi]
         for ui, uid in enumerate(unit_ids):
-            for si, ti, source_pos, target_pos, lag in coords:
+            vector = packed[uid][vi]
+            global_ranks = rankdata(-vector, method="average")
+            outgoing_rank = {}
+            for si, source in enumerate(sources):
+                target_indices = [t for t in range(T_MODEL) if t != source]
+                values = np.asarray([directed[vi, ui, si, t] for t in target_indices], dtype=np.float64)
+                for target, rank in zip(target_indices, rankdata(-values, method="average")):
+                    outgoing_rank[(si, target)] = float(rank)
+            incoming_rank = {}
+            for target in range(T_MODEL):
+                source_indices = [si for si, source in enumerate(sources) if source != target]
+                values = np.asarray([directed[vi, ui, si, target] for si in source_indices], dtype=np.float64)
+                for si, rank in zip(source_indices, rankdata(-values, method="average")):
+                    incoming_rank[(si, target)] = float(rank)
+            for relation_index, (si, ti, source_pos, target_pos, lag) in enumerate(coords):
                 relation_rows.append({"task037_global_index": uid, "domain_id": domains[uid],
                                       "unit_type": unit_meta[uid]["unit_type"], "video_index": vi,
                                       "video_id": video["video_id"], "class_name": video["class_name"],
                                       "class_position": video["class_position"], "source_position": source_pos,
                                       "target_position": target_pos, "lag": lag,
                                       "source_innovation_relative_norm": float(source_mag[vi, si]),
-                                      "A_source_to_target": float(directed[vi, ui, si, ti])})
+                                      "A_source_to_target": float(directed[vi, ui, si, ti]),
+                                      "rank_within_source_targets_desc": outgoing_rank[(si, ti)],
+                                      "rank_within_target_sources_desc": incoming_rank[(si, ti)],
+                                      "rank_within_unit_video_relations_desc": float(global_ranks[relation_index])})
     write_csv(phase_root / "task042_phase_k_directed_relation.csv", relation_rows)
 
     # Directionality compares reciprocal relations only when both endpoints are interior.
@@ -1165,6 +1182,7 @@ def analyze_phase_k(args: argparse.Namespace) -> None:
 
     asym_global = [row["relative_asymmetry"] for row in direction_rows]
     specificity_values = [row["effective_target_count"] for row in target_rows if row["row_type"] == "source_outgoing_specificity"]
+    max_share_values = [row["max_target_share"] for row in target_rows if row["row_type"] == "source_outgoing_specificity"]
     domain_cover = {domain: _stats([r["normalized_leave_one_out_residual_delta"] for r in cover_rows if r["domain_id"] == domain])
                     for domain in DOMAINS}
     same_corr = {metric: _stats([row[metric] for row in stability_rows if row.get("row_type") == "video_pair"
@@ -1174,9 +1192,32 @@ def analyze_phase_k(args: argparse.Namespace) -> None:
                                  and row.get("same_class") is False])
                  for metric in ("pearson", "spearman", "cosine")}
     mag_agg = [r for r in mag_correlation_rows if r["scope"] == "unit_all_videos"]
+    source_magnitude_confound = {metric: {
+        "pearson_across_unit_level_correlations": _stats([r["pearson"] for r in mag_agg if r["metric"] == metric]),
+        "spearman_across_unit_level_correlations": _stats([r["spearman"] for r in mag_agg if r["metric"] == metric]),
+    } for metric in ("mean_A", "max_A", "squared_energy")}
+    mixed_distance_by_type = {kind: _stats([float(r["cosine_distance_d_dir"]) for r in mixed_rows
+                                             if r.get("row_type") == "pairwise_relation_distance" and r.get("pair_type") == kind])
+                              for kind in ("Attention_to_Attention", "FFN_to_FFN", "Attention_to_FFN")}
+    balanced_rows = [r for r in stability_rows if r.get("row_type") in ("balanced_position_pair", "balanced_average_vs_heldout")]
+    balanced_stability = {kind: {metric: _stats([r[metric] for r in balanced_rows if r["row_type"] == kind])
+                                  for metric in ("pearson", "spearman", "cosine")}
+                          for kind in ("balanced_position_pair", "balanced_average_vs_heldout")}
+    top_directed = sorted(relation_rows, key=lambda r: float(r["A_source_to_target"]), reverse=True)[:20]
+    lag_influence = {str(lag): next(r for r in lag_rows if r["scope"] == "global" and int(r["lag"]) == lag)
+                     for lag in range(1, T_MODEL)}
+    lag_means = [lag_influence[str(lag)]["mean"] for lag in range(1, T_MODEL) if lag_influence[str(lag)]["mean"] is not None]
+    lag_overall_descending = all(lag_means[i] >= lag_means[i + 1] for i in range(len(lag_means) - 1))
+    descriptor_rationale = {
+        row["comparison"] + ":" + row["descriptor"]: {"pearson": row.get("pearson"), "spearman": row.get("spearman"),
+                                                        "pearson_p": row.get("pearson_p"), "spearman_p": row.get("spearman_p"),
+                                                        "n": row.get("n")}
+        for row in desc_rows
+    }
+    analysis_head = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
     summary = {
         "task": config["task"], "analysis_status": "completed", "branch": BRANCH,
-        "git_head": config["git_head"], "checkpoint_sha256": CHECKPOINT_SHA,
+        "git_head": config["git_head"], "analysis_code_git_head": analysis_head, "checkpoint_sha256": CHECKPOINT_SHA,
         "unit_count": len(unit_ids), "unit_identities": config["unit_identities"], "domains": list(DOMAINS),
         "video_count": 30, "class_count": 10, "videos_per_class": 3,
         "no_op_gate": noop_gate,
@@ -1185,36 +1226,40 @@ def analyze_phase_k(args: argparse.Namespace) -> None:
                                    "source_self_relations_excluded": True},
         "directed_asymmetry": _stats(asym_global),
         "target_specificity_effective_target_count": _stats(specificity_values),
+        "target_specificity_max_share": _stats(max_share_values),
         "source_magnitude_correlations_unit_all_videos": mag_agg,
-        "lag_influence": {str(lag): next(r for r in lag_rows if r["scope"] == "global" and int(r["lag"]) == lag)
-                          for lag in range(1, T_MODEL)},
+        "source_magnitude_confound_summary": source_magnitude_confound,
+        "lag_influence": lag_influence, "lag_means_overall_descending": lag_overall_descending,
         "video_stability_same_class": same_corr, "video_stability_different_class": diff_corr,
+        "class_balanced_stability": balanced_stability,
         "coverability_by_domain": domain_cover, "coverability_values": [r["normalized_leave_one_out_residual_delta"] for r in cover_rows],
         "domain_271_mixed_unit_count": sum(1 for uid in unit_ids if domains[uid] == "271"),
+        "domain_271_pair_type_distances": mixed_distance_by_type,
+        "strongest_directed_relations_top20": top_directed,
+        "directed_relation_rank_summary": _stats([r["rank_within_unit_video_relations_desc"] for r in relation_rows]),
         "phase_j_comparison": {"pair_distance_correlation": pair_corr,
                                "nearest_neighbor_change_count": int(sum(nearest_changes)),
                                "nearest_neighbor_comparison_count": len(nearest_changes),
                                "mean_absolute_within_domain_rank_change": float(np.mean(pair_rank_changes)) if pair_rank_changes else None,
                                "phase_j_vector_length": phasej_length, "phase_k_vector_length": int(packed[unit_ids[0]].size)},
-        "descriptor_complementarity": desc_rows,
+        "descriptor_complementarity": desc_rows, "descriptor_complementarity_interpretation": descriptor_rationale,
         "required_questions": {
-            "A": {"answer": "PASS", "evidence": "A common patch_embed output hook implements local replacement; no-op replay passed; all non-source positions were bitwise unchanged; source replacement error was zero."},
-            "B": {"answer": "REVIEW_NUMERIC_DISTRIBUTION", "evidence": _stats(asym_global)},
-            "C": {"answer": "REVIEW_NUMERIC_DISTRIBUTION", "evidence": _stats(specificity_values)},
-            "D": {"answer": "REVIEW_NUMERIC_DISTRIBUTION", "evidence": mag_agg},
-            "E": {"answer": "REVIEW_LAG_DISTRIBUTIONS", "evidence": {str(lag): next(r for r in lag_rows if r["scope"] == "global" and int(r["lag"]) == lag) for lag in range(1, T_MODEL)}},
-            "F": {"answer": "REVIEW_CLASS_BALANCED_STABILITY", "same_class": same_corr, "different_class": diff_corr},
-            "G": {"answer": "REVIEW_RAW_DOMAIN_COVERABILITY", "evidence": domain_cover},
-            "H": {"answer": "REVIEW_DOMAIN_271_PAIR_TYPES", "evidence": "Pair distances and leave-one-out simplex coefficients are in task042_phase_k_mixed_domain.csv."},
-            "I": {"answer": "REVIEW_PHASEJ_GEOMETRY_CHANGE", "evidence": "See phase_j_comparison below."},
-            "J": {"answer": "REVIEW_DESCRIPTOR_CORRELATIONS", "evidence": desc_rows},
+            "A": {"answer": "YES_EXACT_AND_LOCAL", "evidence": "No-op replay was bitwise exact on all 13 units; intervention replacement error was zero and every non-source patch position was exactly unchanged."},
+            "B": {"answer": "ASYMMETRY_OBSERVED_BUT_QUALITATIVE_STRENGTH_UNRESOLVED", "evidence": _stats(asym_global)},
+            "C": {"answer": "NON_UNIFORM_BUT_BROAD_TARGET_SPREAD", "effective_target_count": _stats(specificity_values), "maximum_target_share": _stats(max_share_values)},
+            "D": {"answer": "SOURCE_MAGNITUDE_IS_A_STRONG_CONFOUND", "evidence": source_magnitude_confound},
+            "E": {"answer": "LAG_DECAY_DOMINATES; DISTINCT_LONG_RANGE_STRUCTURE_NOT_ESTABLISHED", "overall_lag_means_descending": lag_overall_descending, "evidence": lag_influence},
+            "F": {"answer": "REPRODUCIBLE_ACROSS_VIDEOS_WITH_LITTLE_CLASS_SEPARATION", "same_class": same_corr, "different_class": diff_corr, "class_balanced": balanced_stability},
+            "G": {"answer": "NONTRIVIAL_BUT_DOMAIN_DEPENDENT_COVERABILITY", "evidence": domain_cover},
+            "H": {"answer": "ATTENTION_AND_FFN_SHARE_A_COMPARABLE_DIAGNOSTIC_SPACE_WITH_TYPE_DEPENDENT_DISTANCES", "evidence": mixed_distance_by_type},
+            "I": {"answer": "RELATED_TO_PHASE_J_WITH_SOME_GEOMETRY_CHANGES", "evidence": {"pair_distance_correlation": pair_corr, "nearest_neighbor_changes": int(sum(nearest_changes)), "nearest_neighbor_count": len(nearest_changes), "mean_absolute_within_domain_rank_change": float(np.mean(pair_rank_changes)) if pair_rank_changes else None}},
+            "J": {"answer": "WEAK_TO_MODERATE_COMPLEMENTARITY_HINTS_NOT_CONCLUSIVE", "evidence": descriptor_rationale},
         },
         "decision": "B",
         "decision_label": "DIRECTED_TEMPORAL_INNOVATION_RELATION_WEAK_OR_UNRESOLVED",
-        "decision_rationale": "Conservative predeclared choice pending a full joint reading of the required qualitative evidence; no post-hoc numeric threshold or pruning claim is used.",
+        "decision_rationale": "The intervention is exact, directed structure and video reproducibility are visible, and same-domain coverability varies. However, outgoing influence is strongly associated with source innovation magnitude, lag means broadly decay with distance, same-class and different-class stability are similar, and most Phase-K/Phase-J unit geometry remains related. The predeclared A rule requires every qualitative condition, so B is the supported conservative decision without introducing post-hoc thresholds.",
         "pruning": False, "finetuning": False, "performance_oracle": False,
     }
-    summary["required_questions"]["I"]["evidence"] = summary["phase_j_comparison"]
     runtime_summary = {
         "analysis_status": "completed", "analysis_forwards_expected": 450,
         "analysis_forwards_observed": int(sum(r["analysis_forward_count"] for r in shard_runtime)),
@@ -1248,6 +1293,21 @@ def _render_report(summary: Mapping[str, Any], runtime: Mapping[str, Any], cover
                    phasej_rows: Sequence[Mapping[str, Any]], mixed_rows: Sequence[Mapping[str, Any]]) -> str:
     asym = summary["directed_asymmetry"]
     target = summary["target_specificity_effective_target_count"]
+    max_share = summary["target_specificity_max_share"]
+    lag1 = summary["lag_influence"]["1"]
+    lag14 = summary["lag_influence"]["14"]
+    same_cos = summary["video_stability_same_class"]["cosine"]
+    diff_cos = summary["video_stability_different_class"]["cosine"]
+    mean_conf = summary["source_magnitude_confound_summary"]["mean_A"]
+    cover_text = "; ".join("%s: median=%s, range=[%s,%s]" %
+                             (domain, _cell(stats.get("median")), _cell(stats.get("min")), _cell(stats.get("max")))
+                             for domain, stats in summary["coverability_by_domain"].items())
+    mixed_text = "; ".join("%s: median distance=%s" %
+                             (kind, _cell(stats.get("median")))
+                             for kind, stats in summary["domain_271_pair_type_distances"].items())
+    desc_text = "; ".join("%s: r=%s, rho=%s" %
+                            (row["comparison"] + "/" + row["descriptor"], _cell(row.get("pearson")), _cell(row.get("spearman")))
+                            for row in desc_rows)
     lines = [
         "# Task042 Phase K — Directed Temporal Innovation Influence Diagnostic", "",
         "## Frozen scope and intervention", "",
@@ -1261,17 +1321,17 @@ def _render_report(summary: Mapping[str, Any], runtime: Mapping[str, Any], cover
         f"- GPU event time sum `{runtime['cuda_analysis_forward_event_seconds_sum']:.3f}` seconds; shard wall time max `{runtime['parallel_shard_wall_seconds_max']:.3f}` seconds; GPUs `{runtime['gpu_ids_used']}`.", "",
         "## Required questions", "",
         f"**A. Exact and local?** Yes, by construction and passed no-op/locality checks above.",
-        f"**B. Meaningfully asymmetric?** Relative asymmetry summary across reciprocal interior pairs: median `{asym.get('median')}`, mean `{asym.get('mean')}`, quartiles `{asym.get('q25')}`–`{asym.get('q75')}`. Interpret from full per-unit/domain/video distributions in `task042_phase_k_directionality.csv`; no threshold was introduced.",
-        f"**C. Target-specific rather than uniform?** Effective target count summary: median `{target.get('median')}` of 15 possible targets; see entropy, maximum target share, and full source/target variance records in `task042_phase_k_target_specificity.csv`.",
-        f"**D. More than source magnitude?** Per-unit/video and pooled magnitude correlations are recorded for mean, max, and squared outgoing energy in `task042_phase_k_source_magnitude_audit.csv`; these are diagnostics only and do not residualize influence.",
-        "**E. Local and long-range influence?** The exact lag 1–15 distributions are reported separately in `task042_phase_k_lag_analysis.csv`; no hand-designed lag bins were applied.",
-        "**F. Reproducible across videos?** Same-class and different-class Pearson, Spearman, and cosine comparisons, plus P1/P2/P3 class-balanced comparisons, are in `task042_phase_k_video_stability.csv`.",
-        "**G. Nontrivial same-domain coverability?** Raw leave-one-unit-out normalized residuals and simplex weights are in `task042_phase_k_coverability.csv`; residuals are expanded to video/source/target maps in `task042_phase_k_residual_relation_map.csv` and `.npz`.",
-        "**H. Attention and FFN in a common relation space?** Domain 271 reports Attention↔Attention, FFN↔FFN, and cross-type distances and per-unit collective weights in `task042_phase_k_mixed_domain.csv`.",
-        "**I. New geometry beyond Phase J?** The frozen Phase-J artifact is compared without inference reruns; pair-distance correlation, nearest-neighbor changes, and ranking changes are in `task042_phase_k_phasej_comparison.csv`.",
-        "**J. Complementary to descriptors?** Separate correlations against D_abs, D_rel, and D_st are in `task042_phase_k_descriptor_complementarity.csv`; no combined score is formed.", "",
+        f"**B. Meaningfully asymmetric?** Directionality is present but its qualitative strength is unresolved: relative asymmetry median `{asym.get('median')}`, mean `{asym.get('mean')}`, IQR `{asym.get('q25')}`–`{asym.get('q75')}`. Per-unit/domain/video values remain in `task042_phase_k_directionality.csv`.",
+        f"**C. Target-specific rather than uniform?** Influence is non-uniform but spread across many targets: effective target count median `{target.get('median')}` of 15, with median largest target share `{max_share.get('median')}`. Full entropy and incoming/outgoing variance are in `task042_phase_k_target_specificity.csv`.",
+        f"**D. More than source magnitude?** No clear independence from source perturbation size: across-unit median Pearson/Spearman correlations between source magnitude and outgoing mean influence are `{mean_conf['pearson_across_unit_level_correlations'].get('median')}` / `{mean_conf['spearman_across_unit_level_correlations'].get('median')}`. No residualization was applied; all three requested diagnostics are in `task042_phase_k_source_magnitude_audit.csv`.",
+        f"**E. Local and long-range influence?** Lag means broadly decay with distance (`lag 1` mean `{lag1.get('mean')}`, `lag 14` mean `{lag14.get('mean')}`; lag 15 has no eligible source-target pair). Long-range values remain measurable, but distinct long-range structure beyond distance decay is not established. All lag 1–15 rows are in `task042_phase_k_lag_analysis.csv`.",
+        f"**F. Reproducible across videos?** Yes, relation vectors are similar across both same-class and different-class pairs: median cosine `{same_cos.get('median')}` versus `{diff_cos.get('median')}`. Class-balanced P1/P2/P3 and averaged-heldout comparisons are in `task042_phase_k_video_stability.csv`.",
+        f"**G. Nontrivial same-domain coverability?** Yes, but it varies by domain: {cover_text}. Raw simplex coefficients are in `task042_phase_k_coverability.csv`; the full residual relation maps are in the CSV and NPZ.",
+        f"**H. Attention and FFN in a common relation space?** Yes as a shared directed-vector diagnostic; domain-271 median within/cross-type distances are: {mixed_text}. Per-unit weights and residuals are in `task042_phase_k_mixed_domain.csv`.",
+        f"**I. New geometry beyond Phase J?** Some geometry changes appear, while the two representations remain related: pair-distance Spearman `{summary['phase_j_comparison']['pair_distance_correlation'].get('spearman')}`, nearest neighbors changed `{summary['phase_j_comparison']['nearest_neighbor_change_count']}/{summary['phase_j_comparison']['nearest_neighbor_comparison_count']}`, and mean within-domain rank change `{summary['phase_j_comparison']['mean_absolute_within_domain_rank_change']}`. See `task042_phase_k_phasej_comparison.csv`.",
+        f"**J. Complementary to descriptors?** There are weak-to-moderate separate associations, not a decisive independence result: {desc_text}. Sample sizes are 13 units or 15 within-domain pairs; the descriptors were not combined.", "",
         "## Predeclared decision", "",
-        f"`{summary['decision_label']}`. This conservative B outcome is used unless the complete required evidence qualitatively supports every condition for A; no post-hoc numeric thresholds are introduced. Phase K stops here and makes no pruning or training recommendation.", "",
+        f"`{summary['decision_label']}`. The positive findings are exact intervention semantics, visible asymmetry, cross-video reproducibility, and within-domain coverability variation. The all-of rule for A is not met because source magnitude remains strongly associated with outgoing influence, lag decay dominates, class-conditioned stability is barely separated, and Phase-J geometry remains related. B is retained without post-hoc numeric thresholds. Phase K stops here; no pruning or training recommendation follows.", "",
         "## Artifact inventory", "",
         "The required CSV/JSON outputs are stored alongside this report in the Phase-K output directory. The intervention and source-position audits preserve video/class identity and temporal-position-to-input-frame support.", "",
     ]

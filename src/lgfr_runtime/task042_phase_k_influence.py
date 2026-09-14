@@ -483,8 +483,9 @@ def _model_on_gpu(config: Mapping[str, Any], gpu: int):
     torch.cuda.reset_peak_memory_stats()
     repo = Path(config["repo_root"])
     base, phase_j, ctfrs = _task042_runtime(repo)
-    base_cfg = json.loads((Path(config["base_output"]) / "task042_run_config.json").read_text(encoding="utf-8"))
-    _, _, _, _, model, specs, identity = phase_j._load_model_and_specs(base_cfg, gpu)
+    phase_j_cfg = json.loads((Path(config["base_output"]) / "phase_j" /
+                              "task042_phase_j_run_config.json").read_text(encoding="utf-8"))
+    _, _, _, _, model, specs, identity = phase_j._load_model_and_specs(phase_j_cfg, gpu)
     require(identity.get("checkpoint_sha256") == CHECKPOINT_SHA and identity.get("classifier_head", {}).get("status") == "loaded",
             "checkpoint / authoritative classifier identity mismatch")
     require(not identity.get("missing_keys") and not identity.get("unexpected_keys") and not identity.get("shape_mismatches"),

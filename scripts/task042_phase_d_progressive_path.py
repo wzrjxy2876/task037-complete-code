@@ -21,7 +21,7 @@ TRACE_PREFLIGHT = OUTPUT_DEFAULT / "task042_phase_d_f3_trace_preflight.json"
 EXPECTED_SHA = "4ce0dad71e51f6af65b07ec2c46a10a3e792b694d6427dedc2626d22c0744c63"
 EXPECTED_CLIPS = 3783
 EXPECTED_TASK037_COMMIT_PREFIX = "5524625"
-EXPECTED_SOURCE_SHA = "af792c112a9a8ae92562aab21e582ac22a92459f2f692918c71e7e5fd427f593a"
+EXPECTED_SOURCE_SHA = "af792c112a9a8ae92562aab21e582ac22a92459f2f692918c717e5fd427f593a"
 BRANCH = "task_042_post_bms_frame_relation_redundancy"
 OUTPUT_NAMES = (
  "task042_phase_d_candidate_provenance.csv","task042_phase_d_baseline_path.csv",

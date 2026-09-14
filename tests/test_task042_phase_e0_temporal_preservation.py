@@ -87,6 +87,26 @@ class RelationLossTests(unittest.TestCase):
         self.assertGreater(abs(float(scale.grad.item())), 0.0)
         self.assertIsNone(teacher.grad)
 
+    def test_memory_bounded_chain_rule_vjp_matches_direct_loss_gradient(self):
+        teacher = torch.tensor([[[0.1, 0.8, 2.6, 4.3, 5.2],
+                                 [0.3, 1.7, 2.1, 4.4, 6.0],
+                                 [1.3, 0.5, 2.8, 3.1, 5.7]]])
+        base = torch.tensor([[[0.0, 1.0, 2.0, 4.0, 5.0],
+                              [0.0, 1.5, 2.0, 3.0, 6.0],
+                              [1.0, 0.4, 2.5, 3.2, 5.3]]])
+        direct = base.clone().requires_grad_(True)
+        loss, _ = phase_e0.relation_loss(direct, teacher,
+                                         ["d", "d", "d"], [True, True, True], [1, 2, 3])
+        direct_gradient = torch.autograd.grad(loss, direct)[0]
+        meta = base.clone().requires_grad_(True)
+        meta_loss, _ = phase_e0.relation_loss(meta, teacher,
+                                              ["d", "d", "d"], [True, True, True], [1, 2, 3])
+        coefficients = torch.autograd.grad(meta_loss, meta)[0].detach()
+        differentiable_student = base.clone().requires_grad_(True)
+        vjp_surrogate = (coefficients * differentiable_student).sum()
+        vjp_gradient = torch.autograd.grad(vjp_surrogate, differentiable_student)[0]
+        self.assertTrue(torch.allclose(vjp_gradient, direct_gradient, atol=1e-7, rtol=1e-6))
+
     def test_zero_gate_excludes_removed_unit_but_trains_survivors(self):
         student = torch.tensor([[[0.0, 0.1, 9.0, 0.2, 0.3],
                                  [0.0, 1.0, 2.0, 4.0, 6.0],

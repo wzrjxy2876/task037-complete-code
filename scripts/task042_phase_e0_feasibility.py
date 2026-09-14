@@ -408,41 +408,50 @@ def ce_backward(model: Any, capture: PhaseE0Capture, clips: Sequence[Any],
 
 
 def ltr_backward(model: Any, capture: PhaseE0Capture, clips: Sequence[Any],
-                 pair_ops: Sequence[Any], teacher_sens: Sequence[Sequence[Sequence[float]]],
+                 pair_ops: Sequence[Any], student_sens: Sequence[Sequence[Sequence[float]]],
+                 teacher_sens: Sequence[Sequence[Sequence[float]]],
                  unit_rows: Sequence[Mapping[str, Any]], alive: Sequence[bool],
                  core: Any, phase_d: Any, torch: Any,
                  relation_loss_fn: Any) -> Tuple[float, List[Dict[str, Any]]]:
     domains = [str(row["domain_id"]) for row in unit_rows]
     uids = [int(row["task037_global_index"]) for row in unit_rows]
-    total_loss, detail_rows = 0.0, []
+    # Compute dL/de on a compact sensitivity tensor, then apply its exact VJP
+    # to differentiable, recomputed student activations one pair at a time.
+    # This avoids retaining six full Swin graphs while never detaching student
+    # activations in the gradient path.
+    meta_student = torch.tensor(student_sens, dtype=torch.float32, requires_grad=True)
+    meta_teacher = torch.tensor(teacher_sens, dtype=torch.float32)
+    meta_loss, meta_details = relation_loss_fn(
+        meta_student, meta_teacher, domains, alive, uids,
+        EPS_NORMALIZATION, EPS_PEARSON)
+    coefficients = torch.autograd.grad(meta_loss, meta_student)[0].detach()
+    total_loss = float(meta_loss.detach().item())
+    detail_rows = []
+    for item in meta_details:
+        detail_rows.append({
+            "video_position": int(item["video_position"]),
+            "unit_i": int(item["unit_i"]), "unit_j": int(item["unit_j"]),
+            "domain_id": str(item["domain_id"]),
+            "d_student": float(item["d_student"].detach().item()),
+            "d_teacher": float(item["d_teacher"].detach().item()),
+            "squared_error": float(item["squared_error"].detach().item()),
+            "absolute_drift": float(item["absolute_drift"].detach().item()),
+        })
+    del meta_student, meta_teacher, meta_loss, meta_details
     for video_pos, clip in enumerate(clips):
         _base_logits, h0 = model_forward(model, capture, clip, phase_d)
-        unit_values = [[] for _ in unit_rows]
-        for intervention in pair_ops:
+        for pair_pos, intervention in enumerate(pair_ops):
             swapped = core.apply_temporal_interventions(clip, [intervention], time_dim=1)[0]
             _pair_logits, h1 = model_forward(model, capture, swapped, phase_d)
-            for unit_pos, uid in enumerate(uids):
-                unit_values[unit_pos].append(
-                    PRIMITIVES.relative_sensitivity(h0[uid], h1[uid], EPS_SENSITIVITY))
-            del h1, _pair_logits, swapped
-        student_tensor = torch.stack([torch.stack(values) for values in unit_values]).unsqueeze(0)
-        teacher_tensor = torch.tensor([teacher_sens[video_pos]], dtype=student_tensor.dtype,
-                                      device=student_tensor.device)
-        loss, details = relation_loss_fn(student_tensor, teacher_tensor, domains, alive, uids,
-                                         EPS_NORMALIZATION, EPS_PEARSON)
-        total_loss += float(loss.detach().item()) / len(clips)
-        for item in details:
-            detail_rows.append({
-                "video_position": int(item["video_position"]),
-                "unit_i": int(item["unit_i"]), "unit_j": int(item["unit_j"]),
-                "domain_id": str(item["domain_id"]),
-                "d_student": float(item["d_student"].detach().item()),
-                "d_teacher": float(item["d_teacher"].detach().item()),
-                "squared_error": float(item["squared_error"].detach().item()),
-                "absolute_drift": float(item["absolute_drift"].detach().item()),
-            })
-        (loss / float(len(clips))).backward()
-        del student_tensor, teacher_tensor, details, h0, unit_values, loss, _base_logits
+            e_q = torch.stack([PRIMITIVES.relative_sensitivity(
+                h0[uid], h1[uid], EPS_SENSITIVITY) for uid in uids])
+            coeff = coefficients[video_pos, :, pair_pos].to(
+                device=e_q.device, dtype=e_q.dtype)
+            surrogate = (coeff * e_q).sum()
+            surrogate.backward(retain_graph=pair_pos < len(pair_ops) - 1)
+            del h1, _pair_logits, swapped, e_q, coeff, surrogate
+            capture.clear()
+        del h0, _base_logits
     return total_loss, detail_rows
 
 
@@ -565,7 +574,7 @@ def run_optimizer_sanity(teacher: Any, teacher_sens: Sequence[Sequence[Sequence[
             model.zero_grad(set_to_none=True)
             ce_backward(model, capture, clips, labels, phase_d, torch, functional)
             if method == "CE_PLUS_LTR":
-                ltr_backward(model, capture, clips, pair_ops, teacher_sens, unit_rows,
+                ltr_backward(model, capture, clips, pair_ops, sens, teacher_sens, unit_rows,
                              alive, core, phase_d, torch, relation_loss_fn)
             grad_metrics = finite_gradient_metrics(model, torch)
             require(grad_metrics["finite"], "non-finite optimization sanity gradient")
@@ -608,7 +617,7 @@ def make_report(summary: Mapping[str, Any]) -> str:
         "- 结构门控目标：same-type 域 269 的 Attention head 774；mixed 域 271 的 FFN neuron 328；二者均为 Phase D 域内冻结 F3 rank 1。",
         "- 同域关系参照：两个冻结域中的 7 个 Task042 unit；包含 269 的纯 head 域和 271 的 head/FFN 混合域。",
         "- 校准数据：Task042 冻结视频清单中 video_index 0 与 3；帧对为各 span 的固定 pair_index 0，具体 frame identity 记录在 summary JSON。",
-        "- 关系定义：对 5 个帧对敏感度向量做可微 RMS 标准化；`d=(1-rho)/2`，Pearson 分母使用 `sqrt(||x_c||²||y_c||²+1e-12)`；`L_TR=mean((d_S-d_T)^2)`。",
+        "- 关系定义：对 5 个帧对敏感度向量做可微 RMS 标准化；`d=(1-rho)/2`，Pearson 分母使用 `sqrt(||x_c||²||y_c||²+1e-12)`；`L_TR=mean((d_S-d_T)^2)`。梯度按精确链式 VJP `dL/de · de/dθ` 分帧对重算；学生激活保留计算图，只释放已反传的帧对图。",
         "- 门控为临时 Python 浮点乘法常数，不是参数；Attention 在 `A@V` 前按 head 缩放，FFN 在 post-GELU/pre-fc2 按 neuron 缩放。",
         "- 梯度与训练 sanity 使用相同两段视频、固定 g=0.5、等权 `CE + L_TR`，SGD %d 步，lr=%g；没有调节 Lambda。" %
         (OPTIMIZER_STEPS, OPTIMIZER_LR),
@@ -749,8 +758,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                                             phase_d, torch, functional)
             ce_grad = finite_gradient_metrics(student, torch)
             student.zero_grad(set_to_none=True)
-            direct_ltr, direct_details = ltr_backward(
-                student, capture, clips, pair_ops, teacher_sens, units, alive,
+            vjp_ltr, vjp_details = ltr_backward(
+                student, capture, clips, pair_ops, sens, teacher_sens, units, alive,
                 core, phase_d, torch, relation_loss)
             ltr_grad = finite_gradient_metrics(student, torch)
             gradient_finite = bool(ce_grad["finite"] and ltr_grad["finite"] and
@@ -772,8 +781,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 "gate_trainable": False, "activation_gate_exact_relative_error": scale_error,
                 "alive_relation_pairs_per_video": alive_pair_count,
                 "CE": ce_value, "L_TR": ltr_value,
-                "direct_autograd_L_TR": direct_ltr,
-                "direct_vs_readonly_L_TR_abs_error": abs(direct_ltr - ltr_value),
+                "chain_rule_vjp_L_TR": vjp_ltr,
+                "vjp_vs_readonly_L_TR_abs_error": abs(vjp_ltr - ltr_value),
                 "gate_reset_to_one": all(float(v) == 1.0 for v in audit_state.values.values()),
                 "restored_logits_exact": all_restore,
             })
@@ -811,7 +820,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                                                  separators=(",", ":")),
             })
             student.zero_grad(set_to_none=True)
-            del sens, base_acts, details, direct_details, _student_logits
+            del sens, base_acts, details, vjp_details, _student_logits
             torch.cuda.empty_cache()
 
     capture.close()
@@ -902,6 +911,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "distance": "(1-rho)/2", "loss": "mean same-domain alive-pair (d_student-d_teacher)^2",
             "gate_zero": "unit and its relation pairs excluded exactly at gate=0",
         },
+        "student_gradient_path": "exact chain-rule vector-Jacobian product over frame-pair sensitivity scalars; per-pair student activations are recomputed with autograd enabled and are not detached",
         "optimization": {**optimization, "steps": OPTIMIZER_STEPS,
                          "optimizer": "SGD", "learning_rate": OPTIMIZER_LR,
                          "objective": "CE + 1.0 * L_TR; no lambda search"},
@@ -922,8 +932,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                   ("target_task037_global_index", "domain_id", "domain_group", "unit_type",
                    "layer", "unit_index", "frozen_removal_rank", "f3_global_step", "gate_value",
                    "gate_trainable", "activation_gate_exact_relative_error",
-                   "alive_relation_pairs_per_video", "CE", "L_TR", "direct_autograd_L_TR",
-                   "direct_vs_readonly_L_TR_abs_error", "gate_reset_to_one", "restored_logits_exact"))
+                   "alive_relation_pairs_per_video", "CE", "L_TR", "chain_rule_vjp_L_TR",
+                   "vjp_vs_readonly_L_TR_abs_error", "gate_reset_to_one", "restored_logits_exact"))
     write_csv_new(output / REQUIRED_OUTPUTS[1], relation_rows,
                   ("target_task037_global_index", "target_domain_id", "target_unit_type", "gate_value",
                    "video_index", "video_id", "domain_id", "unit_i", "unit_j", "d_teacher",
@@ -961,8 +971,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         "mean_L_TR_by_gate": statistics.mean(float(row["L_TR"]) for row in gate_rows),
         "mean_L_TR_gradient_norm_by_gate": statistics.mean(
             float(row["L_TR_student_gradient_norm"]) for row in gradient_rows),
-        "max_direct_vs_readonly_L_TR_abs_error": max(
-            float(row["direct_vs_readonly_L_TR_abs_error"]) for row in gate_rows),
+        "max_vjp_vs_readonly_L_TR_abs_error": max(
+            float(row["vjp_vs_readonly_L_TR_abs_error"]) for row in gate_rows),
     }
     report = make_report(summary)
     report_path = output / REQUIRED_OUTPUTS[6]

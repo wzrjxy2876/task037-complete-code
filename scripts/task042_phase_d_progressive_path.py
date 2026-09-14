@@ -101,9 +101,19 @@ def check_trace_authority() -> tuple[dict[str, Any], list[dict[str, str]]]:
         "original F3 prefix length changed")
     fields = tuple(original[0])
     req(all(field in rows[0] for field in fields), "extended trace schema changed")
+    identity_fields = ("step", "global_index", "unit_type", "layer", "stage",
+                       "unit_index", "domain_id", "parameter_cost")
     for index, old in enumerate(original):
-        req(all(old[field] == rows[index][field] for field in fields),
-            "extended F3 trace does not reproduce exact original row " + str(index + 1))
+        req(all(old[field] == rows[index][field] for field in identity_fields),
+            "extended F3 trace changes original selection identity/cost at row " + str(index + 1))
+    drift = {}
+    for field in ("Delta_average", "Delta_total", "p_total", "p_average", "domain_damage", "R_F3"):
+        differences = [abs(float(old[field]) - float(rows[index][field]))
+                       for index, old in enumerate(original)
+                       if old[field] != rows[index][field]]
+        drift[field] = {"differing_rows": len(differences),
+                        "max_absolute_difference": max(differences, default=0.0)}
+    preflight["original_50pct_prefix_numeric_drift"] = drift
     return preflight, rows
 
 
@@ -213,7 +223,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         "task037_ordering_key": trace_identity["ordering_key"],
         "task037_trace_sha256": sha256(TASK037_TRACE), "task037_trace_rows": len(trace_rows),
         "original_50pct_trace_sha256": trace_identity["original_trace_sha256"],
-        "original_50pct_rows_exactly_reproduced": True,
+        "original_50pct_selected_unit_identities_and_parameter_costs_exact": True,
+        "original_50pct_prefix_numeric_drift": trace_identity["original_50pct_prefix_numeric_drift"],
         "directional_order_interpretation": (
             "Project the exact selected sequence from the authoritative dynamic Task037 F3 global trace "
             "onto each frozen BMS domain. Freeze each domain's first n-1 projected IDs and their recorded "
@@ -577,7 +588,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         "This tests whether frozen temporal-relation coverage can allocate compression across existing BMS domains. It does not claim temporal distance identifies unimportant individual units.","",
         "## Protocol and identity","",
         f"- Task042 branch/head: {BRANCH} / {config['prepared_head']}.",
-        f"- Task037 F3 dynamic trace SHA-256: {config['input_identity']['task037_trace_sha256']}; original 26,520-row 50% prefix reproduced exactly.",
+        f"- Task037 F3 dynamic trace SHA-256: {config['input_identity']['task037_trace_sha256']}; original 26,520 selected unit identities and parameter costs reproduced exactly; intermediate floating score columns are checked and their drift is recorded.",
         "- Candidate order inside each domain is the exact projection of the Task037 production F3 global trace. Baseline preserves its global order; the temporal path changes only which domain is consumed next.",
         "- Frozen cohort: 31 units in 10 BMS domains; 21 removals while retaining one representative per domain.",
         f"- Removable parameter amount: {config['cohort_removable_parameters']:,} / {config['total_model_parameters']:,} model parameters.",

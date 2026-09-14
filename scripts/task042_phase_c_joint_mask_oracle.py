@@ -227,7 +227,7 @@ def prepare(args):
         "evaluation_count":len(plan["evaluations"]),"pair_count":len(plan["pairs"]),
         "existing_selection_baseline_status":EXISTING_STATUS,
         "fixed_protocol":{"validation_clips":EXPECTED_CLIPS,"dtype":"float32","amp":False,
-                          "physical_gpus":[0,1],"batch_size":1,"workers_per_gpu":2}}
+                          "physical_gpus":[0,1],"batch_size":4,"workers_per_gpu":2}}
     write_json_new(config_path,config)
     return {"status":"PREPARE_OK","pairs":len(plan["pairs"]),
             "unique_mask_evaluations":len(plan["evaluations"]),
@@ -302,16 +302,21 @@ def preflight(args):
 
 def _live_baseline_check(phase_d,model,batch,baseline_rows,device,torch):
     videos,targets,indices=batch
-    require([int(x) for x in indices.tolist()]==[0],"live first clip is not index 0")
-    x=videos.float().to(device,non_blocking=True); y=targets.long().to(device,non_blocking=True)
+    index_values=[int(x) for x in indices.tolist()]
+    require(index_values==list(range(len(index_values))) and bool(index_values),
+            "live first batch is not the exact validation prefix")
+    x=videos.float().to(device,non_blocking=True)
+    y=targets.long().to(device,non_blocking=True)
     with torch.no_grad(): logits=phase_d.unwrap_logits(model(x))
-    metrics=phase_d.metric_tensors(logits,y); row=baseline_rows[0]
-    require(int(metrics["predicted_class"][0].item())==norm_int(row["predicted_class"]),
-            "cached/live baseline predicted classes differ")
-    require(abs(float(metrics["cross_entropy"][0].item())-float(row["cross_entropy"]))<1e-4,
-            "cached/live baseline CE differs")
-    require(abs(float(metrics["true_class_logit"][0].item())-float(row["true_class_logit"]))<1e-3,
-            "cached/live true-class logit differs")
+    metrics=phase_d.metric_tensors(logits,y)
+    for offset,index in enumerate(index_values):
+        row=baseline_rows[index]
+        require(int(metrics["predicted_class"][offset].item())==norm_int(row["predicted_class"]),
+                "cached/live baseline predicted classes differ")
+        require(abs(float(metrics["cross_entropy"][offset].item())-float(row["cross_entropy"]))<1e-4,
+                "cached/live baseline CE differs")
+        require(abs(float(metrics["true_class_logit"][offset].item())-float(row["true_class_logit"]))<1e-3,
+                "cached/live true-class logit differs")
     return x.detach(),logits.detach().clone(),videos.detach().clone()
 
 def _target_records(eval_row,units,by_spec):
@@ -347,6 +352,8 @@ def worker(args):
     if runtime not in sys.path: sys.path.insert(0,runtime)
     import task041_phase_d_fullval_oracle as phase_d
     import task040_htor_probe as task040
+    phase_d.set_seed(3407)
+    torch.set_num_threads(2)
     model,identity,specs=phase_d.load_model(Path(config["project_root"]),
                                              Path(config["checkpoint"]),device)
     require(identity.get("checkpoint_sha256")==EXPECTED_SHA and
@@ -355,7 +362,7 @@ def worker(args):
             "GPU checkpoint/classifier identity failed")
     by_spec=spec_index(specs)
     loader,nclips=phase_d.build_full_loader(Path(config["project_root"]),config["val_list"],
-           config["frame_root"],num_workers=2,batch_size=1,seed=3407)
+           config["frame_root"],num_workers=2,batch_size=4,seed=3407)
     require(nclips==EXPECTED_CLIPS,"loader is not the full 3783-clip validation split")
     initial=next(iter(loader))
     reference_inputs,reference_logits,reference_cpu=_live_baseline_check(
@@ -376,22 +383,24 @@ def worker(args):
             with torch.no_grad():
                 for videos,targets,indices in iter(loader):
                     index_values=[int(x) for x in indices.tolist()]
-                    require(len(index_values)==1,"worker batch size changed")
-                    index=index_values[0]
-                    require(index==len(seen),"validation index order is not exact")
-                    require(int(targets[0].item())==norm_int(baseline_rows[index]["label"]),
-                            "masked validation label differs from cache")
-                    if index==0:
+                    require(index_values==list(range(len(seen),len(seen)+len(index_values))),
+                            "validation index order is not exact")
+                    target_values=[int(x) for x in targets.tolist()]
+                    for offset,index in enumerate(index_values):
+                        require(target_values[offset]==norm_int(baseline_rows[index]["label"]),
+                                "masked validation label differs from cache")
+                    if not seen:
                         require(torch.equal(videos.cpu(),reference_cpu),
                                 "full-validation transform changed between baseline reuse and masking")
                     logits=phase_d.unwrap_logits(model(videos.float().to(device,non_blocking=True)))
                     require(bool(torch.isfinite(logits).all().item()),"masked logits are non-finite")
                     values=phase_d.metric_tensors(logits,targets.long().to(device,non_blocking=True))
-                    ce_mask.append(float(values["cross_entropy"][0].item()))
-                    top1_mask.append(int(values["top1_correct"][0].item()))
-                    top5_mask.append(int(values["top5_correct"][0].item()))
-                    pred_mask.append(int(values["predicted_class"][0].item()))
-                    seen.append(index)
+                    for offset,index in enumerate(index_values):
+                        ce_mask.append(float(values["cross_entropy"][offset].item()))
+                        top1_mask.append(int(values["top1_correct"][offset].item()))
+                        top5_mask.append(int(values["top5_correct"][offset].item()))
+                        pred_mask.append(int(values["predicted_class"][offset].item()))
+                        seen.append(index)
         require(len(seen)==EXPECTED_CLIPS and seen==list(range(EXPECTED_CLIPS)),
                 "masked inference did not cover all clips in exact order")
         require(calls is not None and len(calls)==len(records) and all(v>0 for v in calls.values()),

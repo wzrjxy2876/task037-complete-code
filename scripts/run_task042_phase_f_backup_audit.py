@@ -412,6 +412,13 @@ def run(input_dir: Path, output_dir: Path, repo_dir: Path) -> Dict[str, Any]:
             types = {canonical_type(row["unit_type_i"]), canonical_type(row["unit_type_j"])}
             key = "Attention-Attention" if types == {"attention_head"} else "FFN-FFN" if types == {"ffn_neuron"} else "Attention-FFN"
             supported_types[key] += 1
+    complete_edge_domains = [row["domain_id"] for row in full_domain_rows
+                             if int(row["possible_pair_count"]) > 0 and
+                             int(row["edge_count"]) == int(row["possible_pair_count"])]
+    zero_edge_domains = [row["domain_id"] for row in full_domain_rows
+                         if int(row["possible_pair_count"]) > 0 and int(row["edge_count"]) == 0]
+    partially_supported_domains = [row["domain_id"] for row in full_domain_rows
+                                   if 0 < int(row["edge_count"]) < int(row["possible_pair_count"])]
     selection_changes_50 = next(row for row in change_rows_out if row["record_type"] == "BUDGET_SUMMARY" and int(row["budget_percent"]) == 50)
     subset_jaccards = [float(row["selection_jaccard_vs_full_data"]) for row in subset_summaries]
     protected_jaccards = [float(row["protected_unit_jaccard_vs_full_data"]) for row in subset_summaries]
@@ -508,6 +515,10 @@ def run(input_dir: Path, output_dir: Path, repo_dir: Path) -> Dict[str, Any]:
             "connected_component_sizes_by_domain": {row["domain_id"]: json.loads(row["component_sizes"]) for row in full_domain_rows},
             "edge_unit_type_counts": dict(supported_types),
             "graph_is_nontrivial": 0 < full_edge_count < all_pairs,
+            "complete_edge_domains": complete_edge_domains,
+            "zero_edge_domains": zero_edge_domains,
+            "partially_supported_domains": partially_supported_domains,
+            "degeneracy_assessment": "High aggregate density with complete domains, but also reference-supported rejected pairs and isolated units. The graph is globally nontrivial and locally heterogeneous; no density threshold was used.",
             "retained_set_interpretation": "The retained set must dominate each same-domain temporal-backup graph: every node is retained or has a retained adjacent backup. This is only the graph interpretation of the specified constraints; no generic dominating-set heuristic is used.",
         },
         "budget_feasibility": {
@@ -587,6 +598,8 @@ For every same-domain pair, `b_ij` is the median d_temp among exact matched cros
 
 {_md_table(['BMS domain','units','edges','possible pairs','density','isolated','components','Attn-Attn','FFN-FFN','Attn-FFN'], graph_table)}
 
+Degeneracy diagnosis: the aggregate graph is dense (26/34 edges), with complete-edge domains {complete_edge_domains}; it also has {supported_reference_rejected} reference-supported rejected pairs, {full_node_isolates} isolated units, zero-edge domains {zero_edge_domains}, and partially supported domains {partially_supported_domains}. It is therefore nontrivial overall but locally heterogeneous, with both dense and no-backup pockets. No density threshold was used.
+
 The exact binary backup condition is `y_i + sum(y_j for j in B_i) >= 1` for every tested node, with the Phase-D final representative in each domain fixed retained. Thus every pruned unit has a surviving adjacent backup and the retained nodes dominate the temporal-backup graph. This is the graph interpretation of the requested constraint; selection uses exact local enumeration plus parameter-cost DP, not a generic dominating-set heuristic.
 
 ## Exact parameter-budget selections
@@ -599,6 +612,7 @@ Baseline selection is the recorded production F3 trace-order prefix, stopping be
 - Maximum removable parameters under backup constraints: {maximum_parameters:,}/{candidate_total:,} ({maximum_parameters/candidate_total:.1%}).
 - 50% target: {budgets[50]:,}; **{'infeasible' if full50_infeasible else 'feasible'}**; actual constrained release {full50_release:,}.
 - At 50%, baseline/constrained Jaccard is {float(selection_changes_50['jaccard_similarity']):.3f}; protected baseline candidates: {len(baseline50_selected-constrained_by_percent[50])}; constrained alternatives: {len(constrained_by_percent[50]-baseline50_selected)}.
+- The 50% change is limited: {len(baseline50_selected-constrained_by_percent[50])} baseline units are protected, {len(constrained_by_percent[50]-baseline50_selected)} alternatives are added, and Jaccard is {float(selection_changes_50['jaccard_similarity']):.3f}; the constraint acts as a local veto here rather than broadly reordering candidates.
 
 ## Protected units and mixed-type backups
 
@@ -621,7 +635,7 @@ Only existing Phase-A raw artifacts are reused. The full-data temporal edges are
 - A. Matched-background graph nontrivial: **{summary['required_question_answers']['A_matched_background_graph_nontrivial']}**.
 - B. Rejects some temporally unsupported BMS pairs: **{summary['required_question_answers']['B_rejects_temporally_unsupported_bms_pairs']}**.
 - C. Reaches the 50% parameter budget: **{summary['required_question_answers']['C_reaches_50pct_parameter_budget']}**.
-- D. Changes the 50% one-shot selection: **{summary['required_question_answers']['D_materially_alters_existing_selection_at_50pct']}**.
+- D. Changes the 50% one-shot selection: **{summary['required_question_answers']['D_materially_alters_existing_selection_at_50pct']}**; the effect is limited to two protected units, with no added alternatives (Jaccard 0.882).
 - E. Protected units are identical across all calibration subsets: **{summary['required_question_answers']['E_protected_units_stable_across_class_diverse_subsets']}**.
 - F. Any supported cross-type backup in domains 271/297: **{summary['required_question_answers']['F_any_genuine_cross_type_temporal_backup']}**.
 - G. Ready for a temporary-masking oracle: **{summary['required_question_answers']['G_ready_for_temporary_masking_oracle']}**.

@@ -1199,6 +1199,14 @@ def analyze_phase_k(args: argparse.Namespace) -> None:
     mixed_distance_by_type = {kind: _stats([float(r["cosine_distance_d_dir"]) for r in mixed_rows
                                              if r.get("row_type") == "pairwise_relation_distance" and r.get("pair_type") == kind])
                               for kind in ("Attention_to_Attention", "FFN_to_FFN", "Attention_to_FFN")}
+    mixed_pair_count_by_type = {kind: sum(1 for r in mixed_rows
+                                          if r.get("row_type") == "pairwise_relation_distance" and r.get("pair_type") == kind)
+                                for kind in ("Attention_to_Attention", "FFN_to_FFN", "Attention_to_FFN")}
+    mixed_domain_unit_count_by_type = {
+        kind: sum(1 for uid in unit_ids if str(unit_meta[uid]["domain_id"]) == "271"
+                  and ((kind == "Attention" and unit_meta[uid]["unit_type"] == "attention_head")
+                       or (kind == "FFN" and unit_meta[uid]["unit_type"] != "attention_head")))
+        for kind in ("Attention", "FFN")}
     balanced_rows = [r for r in stability_rows if r.get("row_type") in ("balanced_position_pair", "balanced_average_vs_heldout")]
     balanced_stability = {kind: {metric: _stats([r[metric] for r in balanced_rows if r["row_type"] == kind])
                                   for metric in ("pearson", "spearman", "cosine")}
@@ -1235,6 +1243,8 @@ def analyze_phase_k(args: argparse.Namespace) -> None:
         "coverability_by_domain": domain_cover, "coverability_values": [r["normalized_leave_one_out_residual_delta"] for r in cover_rows],
         "domain_271_mixed_unit_count": sum(1 for uid in unit_ids if domains[uid] == "271"),
         "domain_271_pair_type_distances": mixed_distance_by_type,
+        "domain_271_pair_type_counts": mixed_pair_count_by_type,
+        "domain_271_unit_type_counts": mixed_domain_unit_count_by_type,
         "strongest_directed_relations_top20": top_directed,
         "directed_relation_rank_summary": _stats([r["rank_within_unit_video_relations_desc"] for r in relation_rows]),
         "phase_j_comparison": {"pair_distance_correlation": pair_corr,
@@ -1302,8 +1312,8 @@ def _render_report(summary: Mapping[str, Any], runtime: Mapping[str, Any], cover
     cover_text = "; ".join("%s: median=%s, range=[%s,%s]" %
                              (domain, _cell(stats.get("median")), _cell(stats.get("min")), _cell(stats.get("max")))
                              for domain, stats in summary["coverability_by_domain"].items())
-    mixed_text = "; ".join("%s: median distance=%s" %
-                             (kind, _cell(stats.get("median")))
+    mixed_text = "; ".join("%s (n=%s pairs): median distance=%s" %
+                             (kind, summary["domain_271_pair_type_counts"].get(kind, 0), _cell(stats.get("median")))
                              for kind, stats in summary["domain_271_pair_type_distances"].items())
     desc_text = "; ".join("%s: r=%s, rho=%s" %
                             (row["comparison"] + "/" + row["descriptor"], _cell(row.get("pearson")), _cell(row.get("spearman")))
@@ -1327,7 +1337,7 @@ def _render_report(summary: Mapping[str, Any], runtime: Mapping[str, Any], cover
         f"**E. Local and long-range influence?** Lag means broadly decay with distance (`lag 1` mean `{lag1.get('mean')}`, `lag 14` mean `{lag14.get('mean')}`; lag 15 has no eligible source-target pair). Long-range values remain measurable, but distinct long-range structure beyond distance decay is not established. All lag 1–15 rows are in `task042_phase_k_lag_analysis.csv`.",
         f"**F. Reproducible across videos?** Yes, relation vectors are similar across both same-class and different-class pairs: median cosine `{same_cos.get('median')}` versus `{diff_cos.get('median')}`. Class-balanced P1/P2/P3 and averaged-heldout comparisons are in `task042_phase_k_video_stability.csv`.",
         f"**G. Nontrivial same-domain coverability?** Yes, but it varies by domain: {cover_text}. Raw simplex coefficients are in `task042_phase_k_coverability.csv`; the full residual relation maps are in the CSV and NPZ.",
-        f"**H. Attention and FFN in a common relation space?** Yes as a shared directed-vector diagnostic; domain-271 median within/cross-type distances are: {mixed_text}. Per-unit weights and residuals are in `task042_phase_k_mixed_domain.csv`.",
+        f"**H. Attention and FFN in a common relation space?** Their directed vectors share the same representation and distance calculation, but this is not evidence of functional equivalence. Domain 271 contains {summary['domain_271_unit_type_counts'].get('Attention', 0)} Attention head and {summary['domain_271_unit_type_counts'].get('FFN', 0)} FFN neurons; therefore an Attention-to-Attention distance is not estimable. Available pairwise distances are {mixed_text}. Per-unit weights and residuals are in `task042_phase_k_mixed_domain.csv`.",
         f"**I. New geometry beyond Phase J?** Some geometry changes appear, while the two representations remain related: pair-distance Spearman `{summary['phase_j_comparison']['pair_distance_correlation'].get('spearman')}`, nearest neighbors changed `{summary['phase_j_comparison']['nearest_neighbor_change_count']}/{summary['phase_j_comparison']['nearest_neighbor_comparison_count']}`, and mean within-domain rank change `{summary['phase_j_comparison']['mean_absolute_within_domain_rank_change']}`. See `task042_phase_k_phasej_comparison.csv`.",
         f"**J. Complementary to descriptors?** There are weak-to-moderate separate associations, not a decisive independence result: {desc_text}. Sample sizes are 13 units or 15 within-domain pairs; the descriptors were not combined.", "",
         "## Predeclared decision", "",

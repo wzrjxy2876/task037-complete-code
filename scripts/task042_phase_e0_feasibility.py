@@ -440,6 +440,8 @@ def ltr_backward(model: Any, capture: PhaseE0Capture, clips: Sequence[Any],
     del meta_student, meta_teacher, meta_loss, meta_details
     for video_pos, clip in enumerate(clips):
         _base_logits, h0 = model_forward(model, capture, clip, phase_d)
+        del _base_logits
+        capture.qkv_v.clear()
         for pair_pos, intervention in enumerate(pair_ops):
             swapped = core.apply_temporal_interventions(clip, [intervention], time_dim=1)[0]
             _pair_logits, h1 = model_forward(model, capture, swapped, phase_d)
@@ -448,10 +450,12 @@ def ltr_backward(model: Any, capture: PhaseE0Capture, clips: Sequence[Any],
             coeff = coefficients[video_pos, :, pair_pos].to(
                 device=e_q.device, dtype=e_q.dtype)
             surrogate = (coeff * e_q).sum()
+            del _pair_logits
             surrogate.backward(retain_graph=pair_pos < len(pair_ops) - 1)
-            del h1, _pair_logits, swapped, e_q, coeff, surrogate
+            del h1, swapped, e_q, coeff, surrogate
             capture.clear()
-        del h0, _base_logits
+            capture.qkv_v.clear()
+        del h0
     return total_loss, detail_rows
 
 

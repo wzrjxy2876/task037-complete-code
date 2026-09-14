@@ -577,7 +577,6 @@ def run_phase_g(
         })
     global_cardinality = Counter(map(len, total_owner_sets))
     global_atom_count = len(total_owner_sets)
-    global_incidence = build_incidence({(str(index), (0, 0, 0, 0)): owners for index, owners in enumerate(total_owner_sets)})
     global_unit_counts = Counter(unit for owners in total_owner_sets for unit in owners)
     global_total_memberships = sum(global_unit_counts.values())
     global_hhi = sum((n / global_total_memberships) ** 2 for n in global_unit_counts.values()) if global_total_memberships else 0.0
@@ -1063,15 +1062,14 @@ def run_phase_g(
             f"Only owner sets containing both unit types count as cross-type functional redundancy."
         ),
         "F": (
-            f"Yes, {sum(len(json.loads(value)) > 0 for value in cover_optional_units.values())} domains have units in some but not all exact minimum covers; "
-            f"per-unit cover membership distinguishes mandatory, optional, and never-present units."
+            f"No. {sum(bool(summary['units_absent_from_at_least_one_optimal_cover'] != '[]') for summary in cover_summaries.values())}/{len(multi_domains)} domains have any unit absent from at least one minimum cover. "
+            f"Here every domain's exact minimum cover contains all its units, so all units are mandatory under the observed incidence."
         ),
         "G": (
-            f"{len(nonmixed_redundancy_domains)} non-mixed domains have min-cover size below domain size. "
-            f"Subset owner Jaccard and exact cover-family/mandatory-unit stability should be judged together; the selected decision is {summary['decision']['label']}."
+            f"No for this exact coverage formulation: minimum-cover size equals domain size in {len(multi_domains)-len(domains_with_redundancy)}/{len(multi_domains)} domains, so it yields no removable unit while preserving every primary atom. "
+            f"Owner stability is descriptive (mean atom-owner Jaccard {summary['stability_descriptive_distribution']['mean_owner_jaccard_across_domains_and_nonfull_subsets']:.3f}; mean exact match {summary['stability_descriptive_distribution']['mean_exact_owner_set_match_rate_across_domains_and_nonfull_subsets']:.3f}), but cannot offset the lack of cover reduction. The selected decision is {summary['decision']['label']}."
         ),
     }
     (output_dir / "task042_phase_g_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _write_report(output_dir / "task042_phase_g_report.md", summary)
     return summary
-

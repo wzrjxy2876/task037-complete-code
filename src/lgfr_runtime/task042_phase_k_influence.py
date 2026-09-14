@@ -1314,7 +1314,8 @@ def _render_report(summary: Mapping[str, Any], runtime: Mapping[str, Any], cover
                              for domain, stats in summary["coverability_by_domain"].items())
     mixed_text = "; ".join("%s (n=%s pairs): median distance=%s" %
                              (kind, summary["domain_271_pair_type_counts"].get(kind, 0), _cell(stats.get("median")))
-                             for kind, stats in summary["domain_271_pair_type_distances"].items())
+                             for kind, stats in summary["domain_271_pair_type_distances"].items()
+                             if summary["domain_271_pair_type_counts"].get(kind, 0) > 0)
     desc_text = "; ".join("%s: r=%s, rho=%s" %
                             (row["comparison"] + "/" + row["descriptor"], _cell(row.get("pearson")), _cell(row.get("spearman")))
                             for row in desc_rows)

@@ -608,6 +608,12 @@ def run_optimizer_sanity(teacher: Any, teacher_sens: Sequence[Sequence[Sequence[
 
 def make_report(summary: Mapping[str, Any]) -> str:
     decision = str(summary["decision"])
+    scale_snapshot = "; ".join(
+        ("unit %s: CE=%0.3g, L_TR=%0.3g, ||grad CE||=%0.3g, ||grad L_TR||=%0.3g (%0.1fx)" %
+         (row["task037_global_index"], row["CE"], row["L_TR"],
+          row["CE_gradient_norm"], row["L_TR_gradient_norm"],
+          row["ltr_to_ce_gradient_norm_ratio"]))
+        for row in summary["scale_snapshot_at_gate_0_5"])
     return "\n".join([
         "# Task042 Phase E.0：时序关系保持损失可行性审计",
         "",
@@ -629,6 +635,8 @@ def make_report(summary: Mapping[str, Any]) -> str:
         "## 核心结果",
         "",
         "- 全部 gate/梯度/损失数值有限：`%s`。" % summary["all_numeric_finite"],
+        "- g=0.5 的 raw loss/梯度尺度：%s。" % scale_snapshot,
+        "- 这两个目标的梯度比差异很大，CE 与 L_TR 不能视为已匹配尺度；本阶段没有选择共享 Lambda，权重需另行预注册后再评估。",
         "- gate 复位后原模型 logits 精确恢复：`%s`；只读门控阶段参数哈希保持：`%s`。" %
         (summary["all_restorations_exact"], summary["parameters_unchanged_during_gate_audit"]),
         "- 非平凡门控下的非零 L_TR 梯度：`%s`；g=0 时 surviving unit 仍获得梯度：`%s`。" %
@@ -960,6 +968,24 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                    "learning_rate", "CE", "L_TR", "relation_drift", "gradient_norm",
                    "gradient_finite", "trainable_gate_parameters", "video_indices", "clip_count",
                    "batch_reused_each_step"))
+    scale_snapshot = []
+    for target in targets:
+        uid = int(target["task037_global_index"])
+        gate_row = next(row for row in gate_rows
+                        if int(row["target_task037_global_index"]) == uid and
+                        float(row["gate_value"]) == 0.5)
+        gradient_row = next(row for row in gradient_rows
+                            if int(row["target_task037_global_index"]) == uid and
+                            float(row["gate_value"]) == 0.5)
+        ce_grad = float(gradient_row["CE_gradient_norm"])
+        ltr_grad = float(gradient_row["L_TR_student_gradient_norm"])
+        scale_snapshot.append({
+            "task037_global_index": uid, "unit_type": target["unit_type"],
+            "domain_id": str(target["domain_id"]), "gate_value": 0.5,
+            "CE": float(gate_row["CE"]), "L_TR": float(gate_row["L_TR"]),
+            "CE_gradient_norm": ce_grad, "L_TR_gradient_norm": ltr_grad,
+            "ltr_to_ce_gradient_norm_ratio": ltr_grad / ce_grad if ce_grad else None,
+        })
     summary = {
         **identity,
         "outputs": {name: {"path": str(output / name),
@@ -977,6 +1003,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             float(row["L_TR_student_gradient_norm"]) for row in gradient_rows),
         "max_vjp_vs_readonly_L_TR_abs_error": max(
             float(row["vjp_vs_readonly_L_TR_abs_error"]) for row in gate_rows),
+        "scale_snapshot_at_gate_0_5": scale_snapshot,
     }
     report = make_report(summary)
     report_path = output / REQUIRED_OUTPUTS[6]

@@ -443,7 +443,16 @@ def preflight(args: argparse.Namespace) -> None:
         require(sha256_file(p) == config["input_sha256"][hash_name], f"frozen {path_name} changed")
     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     require(not torch.cuda.is_available() or not cuda_visible, "CPU preflight must not expose a GPU")
-    core, task040, ctfrs, model, specs, identity = _model(config, torch.device("cpu"))
+    # The existing Video-Swin constructor calls Module.cuda() on its classifier
+    # head unconditionally. During this metadata-only CPU preflight, make that
+    # constructor call a no-op; the adapter's subsequent .to(cpu) and checkpoint
+    # loading remain authoritative. No CUDA device is visible to this process.
+    original_module_cuda = torch.nn.Module.cuda
+    try:
+        torch.nn.Module.cuda = lambda self, *a, **kw: self
+        core, task040, ctfrs, model, specs, identity = _model(config, torch.device("cpu"))
+    finally:
+        torch.nn.Module.cuda = original_module_cuda
     relations = core.enumerate_fixed_cardinality_temporal_pairs(32)
     relation_map = {(int(r.block_size), int(r.pair_index)): r for r in relations}
     require(len(relation_map) == 80, "authoritative Task040 relation enumerator changed")
@@ -457,6 +466,7 @@ def preflight(args: argparse.Namespace) -> None:
               "unit_identity_count": 13, "video_count": 10, "class_count": 10, "relation_count": 10,
               "relation_identities": config["relations"], "precision": config["precision"],
               "mask_specs_checked": {d: len(records[d]) for d in DOMAINS}, "gpu_inference_performed": False,
+              "model_constructed_on_cpu": True, "constructor_cuda_call_temporarily_noop": True,
               "full_validation_oracle_used": False}
     write_json(phase_root / "task042_phase_i_preflight.json", record)
     print("PREFLIGHT_OK exact_Task037_identities=13 video_P1=10 fixed_relations=10 checkpoint=exact gpu_inference=false")

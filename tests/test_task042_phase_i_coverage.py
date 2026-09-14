@@ -14,6 +14,7 @@ sys.path.insert(0, str(REPO / "src" / "lgfr_runtime"))
 import task040_htor_probe as task040
 import task042_phase_c_joint_mask as joint
 from task042_phase_i_coverage import (
+    _cell,
     center_logits,
     domain_contribution,
     exact_dominates,
@@ -33,6 +34,11 @@ def test_centered_logits_are_shift_invariant():
     np.testing.assert_allclose(center_logits(z), center_logits(z + offset), rtol=0, atol=1e-12)
     t = torch.tensor(z, dtype=torch.float32)
     assert torch.allclose(center_logits(t), center_logits(t + torch.tensor(offset, dtype=torch.float32)), rtol=0, atol=1e-6)
+
+
+def test_numpy_profile_serializes_as_json_array():
+    import json
+    assert json.loads(_cell(np.asarray([0.1, 0.2]))) == pytest.approx([0.1, 0.2])
 
 
 def test_full_and_retained_contribution_arithmetic():

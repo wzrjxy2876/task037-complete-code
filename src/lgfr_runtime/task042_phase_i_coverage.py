@@ -94,6 +94,8 @@ def write_json(path: Path, value: Mapping[str, Any]) -> None:
 
 
 def _cell(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
     if isinstance(value, (dict, list, tuple, set, frozenset)):
         if isinstance(value, (set, frozenset)):
             value = sorted(value)
@@ -879,10 +881,23 @@ def finalize(args: argparse.Namespace) -> None:
     temporal_static_different_unmixed = sum(temporal_fronts[key] != static_fronts[key] for key in unmixed)
     loo_rows = [r for r in stability_rows if r["analysis"] == "leave_one_class_out"]
     pair_rows = [r for r in stability_rows if r["analysis"] == "pairset_split"]
-    # Do not invent a numeric stability gate after seeing results. The default
-    # is the preregistered conservative B; A requires a human-readable finding
-    # that every listed evidence condition is actually persuasive.
-    decision = "B. INTRA_GROUP_INTERFRAME_FUNCTIONAL_COVERAGE_WEAK_OR_UNRESOLVED"
+    decision_code = str(args.decision)
+    decision_labels = {
+        "A": "A. INTRA_GROUP_INTERFRAME_FUNCTIONAL_COVERAGE_PROMISING",
+        "B": "B. INTRA_GROUP_INTERFRAME_FUNCTIONAL_COVERAGE_WEAK_OR_UNRESOLVED",
+        "C": "C. INTRA_GROUP_INTERFRAME_FUNCTIONAL_COVERAGE_REJECTED",
+    }
+    decision = decision_labels[decision_code]
+    decision_rationale = str(args.decision_rationale).strip()
+    if decision_code == "A":
+        require(nontrivial_families == len(group_vectors) and nontrivial_families > 0,
+                "A requires nontrivial same-count profile differences")
+        require(unmixed_dominance_families > 0,
+                "A requires dominance/Pareto structure outside mixed domain 271")
+        require(temporal_static_different_unmixed > 0,
+                "A requires temporal-vs-static differences outside mixed domain 271")
+        require(bool(loo_rows) and bool(pair_rows), "A requires completed stability analyses")
+        require(bool(decision_rationale), "A requires a written evidence rationale; do not add a numeric stability threshold")
     coverage_spreads = {f"{d}/k{k}": pairwise_linf_spread(list(v.values())) for (d, k), v in group_vectors.items()}
     loo_rank_values = [r["diagnostic_mean_rank_spearman"] for r in loo_rows if r["diagnostic_mean_rank_spearman"] is not None]
     summary = {
@@ -910,7 +925,7 @@ def finalize(args: argparse.Namespace) -> None:
             "F_mixed_attention_ffn_shared_space": {"answer": "yes" if mixed_rows else "not evaluated", "evaluated_subsets": len(mixed_rows),
                                                      "compositions": dict(Counter(r["retained_type_composition"] for r in mixed_rows)),
                                                      "all_subsets_use_same_400D_centered_logit_function_space": True},
-            "G_ready_for_larger_30x80_validation": {"answer": "not yet; Phase I is a 10x10 feasibility pilot and stability remains empirical",
+            "G_ready_for_larger_30x80_validation": {"answer": ("yes, ready for larger functional-coverage validation only; this does not authorize pruning" if decision_code == "A" else "not yet; Phase I remains weak/unresolved"),
                                                       "full_30x80_inference_performed": False},
         },
         "subset_count": len(subset_meta), "relation_coverage_row_count": len(coverage_rows),
@@ -921,7 +936,9 @@ def finalize(args: argparse.Namespace) -> None:
                            "unmixed_domain_families_with_dominance": unmixed_dominance_families,
                            "unmixed_domain_fronts_differing_from_static": temporal_static_different_unmixed,
                            "automatic_stability_threshold_used": False,
-                           "decision_defaulted_to_conservative_B_pending_evidence_review": True},
+                           "decision_code": decision_code,
+                           "decision_rationale": decision_rationale,
+                           "manual_researcher_decision_after_evidence_review": True},
     }
     write_json(phase_root / "task042_phase_i_summary.json", summary)
     _write_report(phase_root / "task042_phase_i_report.md", summary, temporal_summary, stability_rows, projection_rows)
@@ -935,6 +952,7 @@ def _write_report(path: Path, summary: Mapping[str, Any], temporal: Sequence[Map
     lines = ["# Task042 Phase I — Intra-group Inter-frame Functional Coverage", "",
              f"**Decision: `{summary['decision']}`**", "",
              "This is a temporary joint-mask feasibility pilot. It did not physically prune, fine-tune, or use accuracy/CE/prediction-flip oracles.", "",
+             "**Decision rationale:** " + str(summary["decision_basis"].get("decision_rationale") or "Conservative weak/unresolved decision."), "",
              "## Frozen protocol", "",
              "Four preregistered BMS domains (415, 103, 76, 271); 10 classes × first manifest video; 10 fixed temporal relations (span 1/2/4/8/16, pair index 0 and 8); full 400-D centered logits; FP32, AMP off.", "",
              "Each retained set is compared only with sets from the same domain and the same keep count. Exact dominance uses all 100 relation-wise κ values, with no tolerance.", "",
@@ -977,6 +995,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         if name == "worker":
             p.add_argument("--gpu", type=int, required=True)
             p.add_argument("--domains", nargs="+", required=True)
+        if name == "finalize":
+            p.add_argument("--decision", choices=("A", "B", "C"), default="B")
+            p.add_argument("--decision-rationale", default="")
         p.set_defaults(run=fn)
     args = parser.parse_args(argv)
     if args.command == "prepare":

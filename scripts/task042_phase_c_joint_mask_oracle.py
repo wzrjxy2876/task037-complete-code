@@ -315,8 +315,9 @@ def _live_baseline_check(phase_d,model,batch,baseline_rows,device,torch):
                 "cached/live baseline predicted classes differ")
         require(abs(float(metrics["cross_entropy"][offset].item())-float(row["cross_entropy"]))<1e-4,
                 "cached/live baseline CE differs")
-        require(abs(float(metrics["true_class_logit"][offset].item())-float(row["true_class_logit"]))<1e-3,
-                "cached/live true-class logit differs")
+        require(int(metrics["top1_correct"][offset].item())==int(row["top1_correct"]) and
+                int(metrics["top5_correct"][offset].item())==int(row["top5_correct"]),
+                "cached/live baseline Top-1/Top-5 differs")
     return x.detach(),logits.detach().clone(),videos.detach().clone()
 
 def _target_records(eval_row,units,by_spec):

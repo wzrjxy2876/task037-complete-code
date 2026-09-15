@@ -173,6 +173,13 @@ def trajectory_transitions(states: Any) -> np.ndarray:
     return x[1:] - x[:-1]
 
 
+def concat_video_trajectories(vectors: Mapping[int, Sequence[float]], video_order: Sequence[int]) -> np.ndarray:
+    order = tuple(int(v) for v in video_order)
+    if not order or any(v not in vectors for v in order):
+        raise ValueError("trajectory vectors do not cover the requested video order")
+    return np.concatenate([np.asarray(vectors[v], dtype=np.float64).reshape(-1) for v in order])
+
+
 def split_motion_deformation(transitions: Any) -> tuple[np.ndarray, np.ndarray]:
     x = np.asarray(transitions, dtype=np.float64)
     if x.shape[-1] != 5:
@@ -536,6 +543,19 @@ def analyze(root: Path) -> dict[str, Any]:
         for u in ids:
             stage_rows.append({"row_type": "unit", "domain_id": d, "task037_global_index_i": u, "stage": unit_meta[u]["stage"], "unit_type": unit_meta[u]["unit_type"],
                                "trajectory_norm": np.linalg.norm(traj[:, unit_ids.index(u)]), "delta": cover_delta[u]})
+    # State-component summaries are retained by unit, unit type, and stage.
+    for uid in unit_ids:
+        ui = unit_ids.index(uid)
+        for k, name in enumerate(comp_names):
+            stage_rows.append({"row_type": "state_component_summary", "group": "unit", "group_value": uid,
+                               "task037_global_index_i": uid, "component": name, **_stats(states[:, ui, :, k].reshape(-1))})
+    for field in ("unit_type", "stage"):
+        groups = sorted({str(unit_meta[u][field]) for u in unit_ids})
+        for value in groups:
+            inds = [unit_ids.index(u) for u in unit_ids if str(unit_meta[u][field]) == value]
+            for k, name in enumerate(comp_names):
+                stage_rows.append({"row_type": "state_component_summary", "group": field, "group_value": value,
+                                   "component": name, **_stats(states[:, inds, :, k].reshape(-1))})
     write_csv(root / "task042_phase_m_stage_type_audit.csv", stage_rows)
     runtimes = [json.loads((root / f"task042_phase_m_shard{s}_runtime.json").read_text()) for s in (0, 1)]
     runtime_summary = {"physical_gpu_ids": [0, 1], "gpu_names": [r["gpu_name"] for r in runtimes], "forward_count_total": sum(r["forward_count"] for r in runtimes), "expected_forward_count_total": 30,

@@ -39,11 +39,18 @@ class PhaseMTests(unittest.TestCase):
     def test_vector_order(self):
         f = np.arange(80).reshape(16,5); r = m.trajectory_transitions(f)
         self.assertEqual(r.reshape(-1).size,75); self.assertEqual(r.reshape(-1)[0],5)
+    def test_30_video_concatenation_order(self):
+        vectors = {i: np.full(75, float(i)) for i in range(30)}
+        out = m.concat_video_trajectories(vectors, list(range(30)))
+        self.assertEqual(out.size, 2250)
+        self.assertEqual(out[0], 0.0); self.assertEqual(out[75], 1.0); self.assertEqual(out[-1], 29.0)
+
     def test_motion_deformation(self):
         a,b=m.split_motion_deformation(np.ones((15,5))); self.assertEqual(a.shape[-1],2); self.assertEqual(b.shape[-1],3)
     def test_simplex(self):
         a, res, d=m.solve_simplex_coverage(np.array([.25,1.5,1.25]), [np.array([1,0,2]),np.array([0,2,1])])
         np.testing.assert_allclose(a,[.25,.75],atol=1e-6); np.testing.assert_allclose(res,0,atol=1e-6); self.assertLess(d,1e-6)
+        self.assertTrue(np.all(a >= 0)); self.assertAlmostEqual(float(a.sum()), 1.0, places=12)
     def test_residual_shape(self):
         x=np.arange(30*15*5).reshape(30,15,5); self.assertEqual(x.shape,(30,15,5))
 

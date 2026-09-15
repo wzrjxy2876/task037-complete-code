@@ -167,8 +167,8 @@ def apply_temporal_suppressions(z: Any, positions: Sequence[int]) -> tuple[Any, 
         i = p - 1
         bg = (z[:, :, i - 1] + z[:, :, i + 1]) * 0.5
         q = z[:, :, i] - bg
-        magnitudes[p] = float((torch.linalg.vector_norm(q) /
-                               (torch.linalg.vector_norm(z[:, :, i]) + EPS)).detach().cpu())
+        magnitudes[p] = float((torch.norm(q) /
+                               (torch.norm(z[:, :, i]) + EPS)).detach().cpu())
         modified[:, :, i] = bg
     outside = [i for i in range(T_MODEL) if i + 1 not in pos]
     exact = not outside or bool(torch.equal(z[:, :, outside], modified[:, :, outside]))
@@ -298,8 +298,8 @@ class PhaseLIntervention:
             i = p - 1
             bg = (output[:, :, i - 1] + output[:, :, i + 1]) * 0.5
             q = output[:, :, i] - bg
-            self.magnitudes[p] = float((self.torch.linalg.vector_norm(q) /
-                                        (self.torch.linalg.vector_norm(output[:, :, i]) + EPS)).detach().cpu())
+            self.magnitudes[p] = float((self.torch.norm(q) /
+                                        (self.torch.norm(output[:, :, i]) + EPS)).detach().cpu())
         self.detail = {"outside_positions_exact": True, "replacement_max_abs_error": 0.0,
                        "suppressed_positions": [], "input_shape": list(output.shape)}
         return output
@@ -486,7 +486,12 @@ def run_shard(repo: Path, phase_root: Path, shard: int, gpu: int) -> None:
     videos = list(config["video_identity_order"])
     assigned = videos[shard * 5:(shard + 1) * 5]
     require(len(assigned) == 5, "each GPU must process exactly five position-1 videos")
-    _loader, clips, loader_rows = phase_j._load_all_videos(config, workers=2)
+    # The data loader always enumerates the full frozen 30-video Phase-J pool;
+    # pass that full manifest for identity validation, then process only this
+    # Phase-L position-1 subset on the assigned shard.
+    phase_j_config = json.loads((Path(config["base_output"]) / "phase_j" /
+                                 "task042_phase_j_run_config.json").read_text(encoding="utf-8"))
+    _loader, clips, loader_rows = phase_j._load_all_videos(phase_j_config, workers=2)
     require(len(clips) == 30, "frozen loader must still reproduce the authoritative 30-video pool")
     unit_ids = [int(r["task037_global_index"]) for r in capture_rows]
     unit_slot = {u: i for i, u in enumerate(unit_ids)}

@@ -373,10 +373,13 @@ def prepare(repo: Path, base: Path, phase_root: Path) -> dict[str, Any]:
                      for r in source_rows}
     require(all((vi, p) in source_values for vi in vi_list for p in POSITIONS),
             "Phase-K source magnitudes do not cover the selected videos/positions")
-    sampled_map = {int(k): v for k, v in kcfg["temporal_input_indices_by_video"].items()}
+    sampled_map = {str(k): v for k, v in kcfg["temporal_input_indices_by_video"].items()}
     temporal_map = []
     for v in videos:
-        vi = int(v["video_index"]); sampled = sampled_map[vi]
+        vi = int(v["video_index"])
+        stem = Path(str(v["video_id"])).name
+        require(stem in sampled_map, "Phase-K LoopPadding map has no entry for selected video " + stem)
+        sampled = sampled_map[stem]
         require(len(sampled) == 32, "LoopPadding sample map must have 32 slots")
         for p in range(1, 17):
             temporal_map.append({"video_index": vi, "video_id": v["video_id"], "class_name": v["class_name"],

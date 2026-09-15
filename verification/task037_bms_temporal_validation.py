@@ -102,12 +102,12 @@ def select_domains(scores: pd.DataFrame, valid: set[int]) -> tuple[pd.DataFrame,
     groups = []
     for did, g in x.groupby("domain_id", sort=True):
         a = int((g.type_label == "Attention").sum()); f = int((g.type_label == "FFN").sum())
-        size = len(g)
+        size = len(g); full_size = int((scores.domain_id == did).sum())
         caps = []
         if a >= 3: caps.append("AA")
         if f >= 3: caps.append("FF")
         if a >= 1 and f >= 1 and size >= 3: caps.append("MIXED")
-        groups.append({"domain_id": int(did), "valid_size": size, "attention_count": a,
+        groups.append({"domain_id": int(did), "full_frozen_size": full_size, "valid_size": size, "attention_count": a,
                        "ffn_count": f, "capabilities": ";".join(caps),
                        "stage_set": ";".join(map(str, sorted(g.layer.map(stage).unique())))})
     comp = pd.DataFrame(groups).sort_values("domain_id").reset_index(drop=True)

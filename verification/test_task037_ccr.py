@@ -46,6 +46,25 @@ def test_selection_gap_and_baselines():
     assert summ["bootstrap_replicates"] == 10000 and summ["bootstrap_seed"] == 3407
 
 
+def test_aggregation_arithmetic():
+    d = pd.read_csv(OUT / "task_ccr_context_regret.csv")
+    rel = d[d.context_id > 0]
+    vmax = rel.groupby(["video_key", "domain_id", "global_index"], as_index=False).proxy_regret.max().groupby(["domain_id", "global_index"], as_index=False).proxy_regret.mean()
+    got = pd.read_csv(OUT / "task_ccr_unit_scores.csv")[["domain_id", "global_index", "CCR"]]
+    chk = got.merge(vmax, on=["domain_id", "global_index"])
+    assert np.allclose(chk.CCR, chk.proxy_regret)
+    oracle = pd.read_csv(OUT / "task_ccr_oracle_scores.csv")
+    ov = rel.groupby(["video_key", "domain_id", "global_index"], as_index=False).oracle_regret.max().groupby(["domain_id", "global_index"], as_index=False).oracle_regret.mean()
+    assert np.allclose(oracle.merge(ov, on=["domain_id", "global_index"]).oracle_CCR, oracle.merge(ov, on=["domain_id", "global_index"]).oracle_regret)
+    winners = d.sort_values(["video_key", "context_id", "domain_id", "proxy_signed_damage", "global_index"]).groupby(["video_key", "context_id", "domain_id"], as_index=False).first()
+    freq = winners.groupby(["domain_id", "global_index"]).size().rename("frequency").reset_index()
+    assert np.allclose(pd.read_csv(OUT / "task_ccr_frequency_baseline.csv").merge(freq, on=["domain_id", "global_index"]).frequency_x, pd.read_csv(OUT / "task_ccr_frequency_baseline.csv").merge(freq, on=["domain_id", "global_index"]).frequency_y)
+    mean = d.groupby(["domain_id", "global_index"]).proxy_signed_damage.mean().reset_index(name="mean_damage")
+    assert np.allclose(pd.read_csv(OUT / "task_ccr_mean_baseline.csv").merge(mean, on=["domain_id", "global_index"]).mean_damage_x, pd.read_csv(OUT / "task_ccr_mean_baseline.csv").merge(mean, on=["domain_id", "global_index"]).mean_damage_y)
+    fixed = d[d.context_id == 0].groupby(["domain_id", "global_index"]).proxy_signed_damage.mean().reset_index(name="fixed_original")
+    assert np.allclose(pd.read_csv(OUT / "task_ccr_fixed_baseline.csv").merge(fixed, on=["domain_id", "global_index"]).fixed_original_x, pd.read_csv(OUT / "task_ccr_fixed_baseline.csv").merge(fixed, on=["domain_id", "global_index"]).fixed_original_y)
+
+
 def test_deterministic_splits_and_bootstrap():
     pos = pd.read_csv(OUT / "task_ccr_position_stability.csv")
     assert set(pos.split) == {"position_1", "position_2", "position_3"}

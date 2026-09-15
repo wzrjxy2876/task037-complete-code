@@ -60,7 +60,7 @@ def main(a):
  for parity in (0,1):
   shard=vm[vm.manifest_order%2==parity].sort_values('manifest_order')
   with open(out/f'task_bms_confirm30_gpu{parity}_val_list.txt','w') as f:
-   for _,r in shard.iterrows(): f.write(f"{r.video_path} {int(r.duration)} {int(r.label)}\\n")
+   for _,r in shard.iterrows(): f.write(f"{r.video_path} {int(r.duration)} {int(r.label)}\n")
  cm=[]
  for s in SPANS:
   for p in CANON:

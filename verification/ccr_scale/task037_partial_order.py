@@ -290,7 +290,7 @@ def main() -> None:
     # Build a compact CPU staging tensor, then move all numeric work to CUDA.
     domains = sorted(units_by)
     domain_cache = {}
-    profile_rows=[]; sample_rows=[]; comp_rows=[]; edge_rows=[]; oracle_edge_rows=[]; proxy_front_rows=[]; oracle_front_rows=[]
+    profile_rows=[]; comp_rows=[]; sample300_rows=[]; edge_rows=[]; oracle_edge_rows=[]; proxy_front_rows=[]; oracle_front_rows=[]
     recovery_rows=[]; front_recovery_rows=[]; incomp_rows=[]; expl_rows=[]; type_rows=[]; n9_rows=[]; n9_stab_rows=[]
     cal_rows=[]; ctx_rows=[]; loco_rows=[]; ablation_rows=[]; orig_rows=[]; forced_rows=[]; rev_rows=[]; safety_rows=[]
     primary_q_gpu = {}; primary_oracle_gpu = {}
@@ -327,7 +327,21 @@ def main() -> None:
             proxy_front_rows.append({'domain_id':d,'category':cat_by[d],'global_index':u,'front_index_proxy':int(fpn[j])})
             oracle_front_rows.append({'domain_id':d,'category':cat_by[d],'global_index':u,'front_index_oracle':int(forn[j])})
         for kind,a,fi in [('proxy',apn,fpn),('oracle',aon,forn)]:
-            fs=Counter(map(int,fi)); sample_rows.append({'domain_id':d,'category':cat_by[d],'profile_kind':kind,'pair_count':total_pairs,'comparable_pairs':int(a.sum()),'incomparable_pairs':total_pairs-int(a.sum()),'comparability_fraction':float(a.sum()/max(1,total_pairs)),'dominance_edge_count':int(a.sum()),'dominance_edge_density':float(a.sum()/max(1,n*(n-1))),'number_of_fronts':int(fi.max()),'front_sizes':'|'.join(str(fs[k]) for k in sorted(fs)),'F1_size':int(fs[1]),'maximum_front_size':int(max(fs.values())),'maximum_depth':int(fi.max()),'longest_dominance_chain':longest_chain(a)})
+            fs=Counter(map(int,fi)); comp_rows.append({'domain_id':d,'category':cat_by[d],'profile_kind':kind,'dimensions':10,'pair_count':total_pairs,'comparable_pairs':int(a.sum()),'incomparable_pairs':total_pairs-int(a.sum()),'comparability_fraction':float(a.sum()/max(1,total_pairs)),'dominance_edge_count':int(a.sum()),'dominance_edge_density':float(a.sum()/max(1,n*(n-1))),'number_of_fronts':int(fi.max()),'front_sizes':'|'.join(str(fs[k]) for k in sorted(fs)),'F1_size':int(fs[1]),'maximum_front_size':int(max(fs.values())),'maximum_depth':int(fi.max()),'longest_dominance_chain':longest_chain(a)})
+
+        # Diagnostic-only sample-level order: one coordinate for each
+        # video/context pair (30 x 10 = 300).  It is never used for the
+        # candidate representation or decision.
+        sp = RP[:, 1:11, :].permute(2, 0, 1).reshape(n, -1)
+        so = RO[:, 1:11, :].permute(2, 0, 1).reshape(n, -1)
+        asp = dominance(sp); aso = dominance(so); fsp = fronts(asp); fso = fronts(aso)
+        aspn, ason = asp.detach().cpu().numpy(), aso.detach().cpu().numpy()
+        fspn, fson = fsp.detach().cpu().numpy(), fso.detach().cpu().numpy()
+        assert sp.shape[1] == 300 and so.shape[1] == 300
+        assert_poset(aspn, fspn); assert_poset(ason, fson)
+        for kind, a, fi in [('proxy', aspn, fspn), ('oracle', ason, fson)]:
+            fs = Counter(map(int, fi))
+            sample300_rows.append({'domain_id':d,'category':cat_by[d],'profile_kind':kind,'dimensions':300,'pair_count':total_pairs,'comparable_pairs':int(a.sum()),'incomparable_pairs':total_pairs-int(a.sum()),'comparability_fraction':float(a.sum()/max(1,total_pairs)),'dominance_edge_count':int(a.sum()),'dominance_edge_density':float(a.sum()/max(1,n*(n-1))),'number_of_fronts':int(fi.max()),'front_sizes':'|'.join(str(fs[k]) for k in sorted(fs)),'F1_size':int(fs[1]),'maximum_front_size':int(max(fs.values())),'maximum_depth':int(fi.max()),'longest_dominance_chain':longest_chain(a)})
         er=edge_recovery(apn,aon); er.update({'domain_id':d,'category':cat_by[d]}); recovery_rows.append(er)
         fr=structural_metrics(apn,fpn,aon,forn,us); fr.update({'domain_id':d,'category':cat_by[d]}); front_recovery_rows.append(fr)
         # Exact relation-wise incomparability and dominance explanations.
@@ -446,10 +460,10 @@ def main() -> None:
         {'check':'synthetic_partial_order_tests','status':'PASS','observed':'strict/reversal/identical/transitive/acyclic/front/GPU-CPU','expected':'PASS'},
       ]),
       'task_partial_order_relation_profiles.csv':pd.DataFrame(profile_rows),
-      'task_partial_order_sample300_audit.csv':pd.DataFrame(sample_rows),
+      'task_partial_order_sample300_audit.csv':pd.DataFrame(sample300_rows),
       'task_partial_order_proxy_edges.csv':pd.DataFrame(edge_rows),
       'task_partial_order_oracle_edges.csv':pd.DataFrame(oracle_edge_rows),
-      'task_partial_order_comparability.csv':pd.DataFrame(sample_rows),
+      'task_partial_order_comparability.csv':pd.DataFrame(comp_rows),
       'task_partial_order_proxy_fronts.csv':pd.DataFrame(proxy_front_rows),
       'task_partial_order_oracle_fronts.csv':pd.DataFrame(oracle_front_rows),
       'task_partial_order_edge_recovery.csv':pd.DataFrame(recovery_rows),
@@ -472,9 +486,9 @@ def main() -> None:
     # Runtime and summary are written after all GPU work, before report formatting.
     t_stats=time.time(); runtime={'gpu_used':True,'gpu_model':torch.cuda.get_device_name(device),'gpu_tensor_workload':'within-domain normalization, 10-D/300-D dominance matrices, Pareto fronts, N9/calibration/context/LOCO/ablation comparisons','cpu_only_workload':'CSV parsing, identity/hash checks, small serialization loops, final report writing','peak_gpu_memory_mb':float(torch.cuda.max_memory_allocated(device)/1024**2),'wall_clock_seconds':float(time.time()-t0),'data_preparation_wall_clock_seconds':float(t_gpu-t_data),'primary_and_stability_wall_clock_seconds':float(t_stats-t_gpu),'report_wall_clock_seconds':0.0,'no_model_inference':True,'no_forward':True,'no_backward':True,'no_masking':True,'seed':args.seed}
     # Key aggregate feasibility statistics.
-    compdf=pd.DataFrame(sample_rows); recdf=pd.DataFrame(recovery_rows); frdf=pd.DataFrame(front_recovery_rows); n9df=pd.DataFrame(n9_rows); caldf=pd.DataFrame(cal_rows); ctxdf=pd.DataFrame(ctx_rows); revdf=pd.DataFrame(rev_rows)
+    compdf=pd.DataFrame(comp_rows); sample300df=pd.DataFrame(sample300_rows); recdf=pd.DataFrame(recovery_rows); frdf=pd.DataFrame(front_recovery_rows); n9df=pd.DataFrame(n9_rows); caldf=pd.DataFrame(cal_rows); ctxdf=pd.DataFrame(ctx_rows); revdf=pd.DataFrame(rev_rows)
     primary_proxy_incomp=float(compdf[(compdf.profile_kind=='proxy')].incomparable_pairs.mean()); primary_oracle_incomp=float(compdf[(compdf.profile_kind=='oracle')].incomparable_pairs.mean())
-    summary={'task':'TASK037_RELATION_CONDITIONED_PARTIAL_ORDER','decision':'PENDING_AUDIT','domains':len(domains),'units':len(um),'videos':len(vm),'classes':int(vm.class_index.nunique()),'relation_contexts':10,'primary_profile_dimensions':10,'sample300_dimensions':300,'mean_proxy_incomparable_pairs':primary_proxy_incomp,'mean_oracle_incomparable_pairs':primary_oracle_incomp,'mean_proxy_comparability':float(compdf[compdf.profile_kind=='proxy'].comparability_fraction.mean()),'mean_oracle_comparability':float(compdf[compdf.profile_kind=='oracle'].comparability_fraction.mean()),'mean_edge_recovery_F1':float(recdf.F1.mean()),'mean_front_F1_jaccard':float(frdf.f1_front_jaccard.mean()),'mean_oracle_F1_front_size':float(pd.DataFrame(oracle_front_rows).groupby('domain_id').front_index_oracle.apply(lambda x:(x==1).sum()).mean()),'scalar_forced_order_mean':float(pd.DataFrame(forced_rows).query("method in ['CCR','frequency','mean','fixed']").forced_order_rate.mean()),'relation_reversal_incomparable_mean':float(revdf[revdf.oracle_profile_status=='incomparable'].reversal_frequency.mean()) if not revdf.empty and (revdf.oracle_profile_status=='incomparable').any() else 0.0,'relation_reversal_dominated_mean':float(revdf[revdf.oracle_profile_status!='incomparable'].reversal_frequency.mean()) if not revdf.empty else 0.0,'n9a_mean_edge_jaccard':float(n9df[n9df.replication=='n9a'].edge_jaccard.mean()),'n9a_mean_f1_jaccard':float(n9df[n9df.replication=='n9a'].f1_front_jaccard.mean()),'m5_mean_edge_jaccard':float(ctxdf[ctxdf.context_count==5].edge_jaccard.mean()),'m5_mean_f1_jaccard':float(ctxdf[ctxdf.context_count==5].f1_front_jaccard.mean()),'gpu_runtime':runtime,'no_pruning':True,'no_finetuning':True}
+    summary={'task':'TASK037_RELATION_CONDITIONED_PARTIAL_ORDER','decision':'PENDING_AUDIT','domains':len(domains),'units':len(um),'videos':len(vm),'classes':int(vm.class_index.nunique()),'relation_contexts':10,'primary_profile_dimensions':10,'sample300_dimensions':300,'mean_proxy_incomparable_pairs':primary_proxy_incomp,'mean_oracle_incomparable_pairs':primary_oracle_incomp,'mean_proxy_comparability':float(compdf[compdf.profile_kind=='proxy'].comparability_fraction.mean()),'mean_oracle_comparability':float(compdf[compdf.profile_kind=='oracle'].comparability_fraction.mean()),'mean_sample300_proxy_comparability':float(sample300df[sample300df.profile_kind=='proxy'].comparability_fraction.mean()),'mean_sample300_oracle_comparability':float(sample300df[sample300df.profile_kind=='oracle'].comparability_fraction.mean()),'mean_sample300_proxy_incomparable_pairs':float(sample300df[sample300df.profile_kind=='proxy'].incomparable_pairs.mean()),'mean_sample300_oracle_incomparable_pairs':float(sample300df[sample300df.profile_kind=='oracle'].incomparable_pairs.mean()),'mean_edge_recovery_F1':float(recdf.F1.mean()),'mean_front_F1_jaccard':float(frdf.f1_front_jaccard.mean()),'mean_oracle_F1_front_size':float(pd.DataFrame(oracle_front_rows).groupby('domain_id').front_index_oracle.apply(lambda x:(x==1).sum()).mean()),'scalar_forced_order_mean':float(pd.DataFrame(forced_rows).query("method in ['CCR','frequency','mean','fixed']").forced_order_rate.mean()),'relation_reversal_incomparable_mean':float(revdf[revdf.oracle_profile_status=='incomparable'].reversal_frequency.mean()) if not revdf.empty and (revdf.oracle_profile_status=='incomparable').any() else 0.0,'relation_reversal_dominated_mean':float(revdf[revdf.oracle_profile_status!='incomparable'].reversal_frequency.mean()) if not revdf.empty else 0.0,'n9a_mean_edge_jaccard':float(n9df[n9df.replication=='n9a'].edge_jaccard.mean()),'n9a_mean_f1_jaccard':float(n9df[n9df.replication=='n9a'].f1_front_jaccard.mean()),'m5_mean_edge_jaccard':float(ctxdf[ctxdf.context_count==5].edge_jaccard.mean()),'m5_mean_f1_jaccard':float(ctxdf[ctxdf.context_count==5].f1_front_jaccard.mean()),'gpu_runtime':runtime,'no_pruning':True,'no_finetuning':True}
     # Predeclared qualitative adjudication.  This is deliberately not an
     # automated numeric gate: no threshold is introduced after seeing the
     # tables, and no scalar score is used to force an order.  The complete
@@ -508,7 +522,7 @@ This is an offline feasibility audit using the completed CCR-scale scalar tables
 ## Required scientific questions
 
 - **A/C. Nontrivial partial order:** proxy mean comparability is {summary['mean_proxy_comparability']:.6g}; oracle mean comparability is {summary['mean_oracle_comparability']:.6g}. Oracle incomparable pairs remain {primary_oracle_incomp:.3g} per domain on average, so context dimensions do not collapse to a scalar total order.
-- **B. 300-D degeneracy:** see `task_partial_order_sample300_audit.csv`; it is deliberately not used as the candidate representation.
+- **B. 300-D degeneracy:** the sample-level audit has proxy/oracle mean comparability {summary['mean_sample300_proxy_comparability']:.6g}/{summary['mean_sample300_oracle_comparability']:.6g} and mean incomparable pairs {summary['mean_sample300_proxy_incomparable_pairs']:.6g}/{summary['mean_sample300_oracle_incomparable_pairs']:.6g}; it is deliberately not used as the candidate representation.
 - **D/E. Proxy recovery:** mean edge-recovery F1 is {summary['mean_edge_recovery_F1']:.6g}; mean oracle-front Jaccard is {summary['mean_front_F1_jaccard']:.6g}.
 - **F. Type coverage:** AA, FF and MIXED are reported separately; MIXED edge directions are listed in `task_partial_order_type_summary.csv`.
 - **G. Reversals:** mean reversal frequency for oracle-incomparable pairs is {summary['relation_reversal_incomparable_mean']:.6g}, versus {summary['relation_reversal_dominated_mean']:.6g} for dominated pairs.

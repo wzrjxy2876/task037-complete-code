@@ -245,6 +245,15 @@ def _corr(a: Sequence[float], b: Sequence[float], method: str) -> float | None:
     return float(value) if np.isfinite(value) else None
 
 
+def _rank_desc(values: Sequence[float]) -> np.ndarray:
+    """Return 1-based descending average ranks, preserving exact ties."""
+    from scipy.stats import rankdata
+    x = np.asarray(values, dtype=np.float64).reshape(-1)
+    if x.size == 0 or not np.all(np.isfinite(x)):
+        raise ValueError("descending ranks require a nonempty finite vector")
+    return rankdata(-x, method="average").astype(np.float64)
+
+
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     x, y = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
     den = float(np.linalg.norm(x) * np.linalg.norm(y))

@@ -117,6 +117,10 @@ class PhaseLTests(unittest.TestCase):
         self.assertEqual(len(set(phase_l.PAIRS)), 91)
         self.assertTrue(all(s < t for s, t in phase_l.PAIRS))
 
+    def test_descending_pair_ranks_preserve_ties(self):
+        ranks = phase_l._rank_desc([0.7, 0.2, 0.7, 0.1])
+        np.testing.assert_array_equal(ranks, np.array([1.5, 3.0, 1.5, 4.0]))
+
     def test_pair_symmetry_and_zero_diagonal(self):
         vector = np.arange(91, dtype=np.float64)
         matrix = phase_l.symmetric_matrix_from_upper(vector)

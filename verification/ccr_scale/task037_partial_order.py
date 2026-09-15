@@ -164,6 +164,29 @@ def longest_chain(a: np.ndarray) -> int:
     return max((visit(i) for i in range(n)), default=0)
 
 
+def assert_poset(a: np.ndarray, fi: np.ndarray) -> None:
+    """Check irreflexivity, antisymmetry, acyclicity and front exhaustion."""
+    n = a.shape[0]
+    assert not np.diag(a).any()
+    assert not (a & a.T).any()
+    out = {i: np.where(a[i])[0].tolist() for i in range(n)}
+    state = np.zeros(n, dtype=np.int8)
+    def visit(i: int) -> None:
+        if state[i] == 1:
+            raise AssertionError('dominance cycle')
+        if state[i] == 2:
+            return
+        state[i] = 1
+        for j in out[i]:
+            visit(int(j))
+        state[i] = 2
+    for i in range(n):
+        visit(i)
+    assert np.array_equal(np.sort(np.unique(fi)), np.arange(1, int(fi.max()) + 1))
+    for i, j in zip(*np.where(a)):
+        assert int(fi[i]) < int(fi[j])
+
+
 def profile(values: torch.Tensor, vm: pd.DataFrame, vids: list[int], contexts: list[int]) -> torch.Tensor:
     # Equal class weight: average the three videos within each class first.
     classes = sorted(vm.iloc[vids].class_index.astype(int).unique().tolist())
@@ -212,6 +235,7 @@ def synthetic_tests(device: torch.device) -> None:
     assert not bool(dominance(b).any())  # reversal/incomparable
     assert not bool(dominance(torch.tensor([[.2,.2],[.2,.2]], device=device)).any())
     fi = fronts(dominance(a)); assert sorted(fi.detach().cpu().tolist()) == [1, 2, 3]
+    assert_poset(d.cpu().numpy(), fi.cpu().numpy())
     # GPU/CPU reference equivalence on a compact random case.
     z = torch.tensor([[.1,.4,.3],[.2,.4,.2],[.3,.2,.5]], device=device)
     dg = dominance(z).cpu().numpy()
@@ -287,6 +311,7 @@ def main() -> None:
         primary_q_gpu[d] = rp; primary_oracle_gpu[d] = ro; domain_cache[d] = {'P':P,'O':O,'RP':RP,'RO':RO,'units':us,'ui':ui}
         apx = dominance(rp); aor = dominance(ro); fpx = fronts(apx); forr = fronts(aor)
         apn, aon = apx.detach().cpu().numpy(), aor.detach().cpu().numpy(); fpn, forn = fpx.detach().cpu().numpy(), forr.detach().cpu().numpy()
+        assert_poset(apn, fpn); assert_poset(aon, forn)
         total_pairs = n*(n-1)//2
         for kind, q in [('proxy',rp),('oracle',ro)]:
             qn = q.detach().cpu().numpy();
@@ -320,6 +345,10 @@ def main() -> None:
         n9_profiles={}
         for lab in ['n9a','n9b','n9c']:
             vi=sets[lab]; ix=torch.tensor(vi,device=device,dtype=torch.long); q9=profile(RP,vm,vi,REL_CONTEXT_IDS); a9=dominance(q9); f9=fronts(a9); an=a9.cpu().numpy(); fn=f9.cpu().numpy(); n9_profiles[lab]=(an,fn)
+            a9_repeat = dominance(profile(RP, vm, vi, REL_CONTEXT_IDS)).cpu().numpy()
+            f9_repeat = fronts(dominance(profile(RP, vm, vi, REL_CONTEXT_IDS))).cpu().numpy()
+            assert np.array_equal(an, a9_repeat) and np.array_equal(fn, f9_repeat)
+            assert_poset(an, fn)
             m=structural_metrics(an,fn,aon,forn,us); m.update({'domain_id':d,'category':cat_by[d],'replication':lab,'calibration_videos':len(vi)}); n9_rows.append(m)
         for x in ['n9a','n9b','n9c']:
             for y in ['n9a','n9b','n9c']:
@@ -328,10 +357,10 @@ def main() -> None:
                     n9_stab_rows.append({'domain_id':d,'category':cat_by[d],'replication_a':x,'replication_b':y,'edge_jaccard':jaccard(edge_set(ax,us),edge_set(ay,us)),'f1_front_jaccard':jaccard(f1_set(fx,us),f1_set(fy,us)),'front_index_agreement':float((fx==fy).mean())})
         # Calibration-size curve against full-30 oracle profile.
         for N in CAL_N:
-            vi=calibration_indices(vm,N,sets); qn=profile(RP,vm,vi,REL_CONTEXT_IDS); an=dominance(qn).cpu().numpy(); fn=fronts(dominance(qn)).cpu().numpy(); m=structural_metrics(an,fn,aon,forn,us); m.update({'domain_id':d,'category':cat_by[d],'N':N,'calibration_videos':len(vi)}); cal_rows.append(m)
+            vi=calibration_indices(vm,N,sets); qn=profile(RP,vm,vi,REL_CONTEXT_IDS); an=dominance(qn).cpu().numpy(); fn=fronts(dominance(qn)).cpu().numpy(); an_repeat=dominance(profile(RP,vm,vi,REL_CONTEXT_IDS)).cpu().numpy(); assert np.array_equal(an,an_repeat); assert_poset(an,fn); m=structural_metrics(an,fn,aon,forn,us); m.update({'domain_id':d,'category':cat_by[d],'N':N,'calibration_videos':len(vi)}); cal_rows.append(m)
         # Context-count curve against the primary 10-D oracle profile.
         for M,ids in [(5,[1,3,5,7,9]),(10,list(range(1,11)))]:
-            qn=profile(RP,vm,list(range(30)),ids); an=dominance(qn).cpu().numpy(); fn=fronts(dominance(qn)).cpu().numpy(); m=structural_metrics(an,fn,aon,forn,us); m.update({'domain_id':d,'category':cat_by[d],'context_count':M,'context_ids':'|'.join(map(str,ids))}); ctx_rows.append(m)
+            qn=profile(RP,vm,list(range(30)),ids); an=dominance(qn).cpu().numpy(); fn=fronts(dominance(qn)).cpu().numpy(); an_repeat=dominance(profile(RP,vm,list(range(30)),ids)).cpu().numpy(); assert np.array_equal(an,an_repeat); assert_poset(an,fn); m=structural_metrics(an,fn,aon,forn,us); m.update({'domain_id':d,'category':cat_by[d],'context_count':M,'context_ids':'|'.join(map(str,ids))}); ctx_rows.append(m)
         # LOCO class stability against full-30 proxy structure.
         afull=apn; ffull=fpn
         for c in sorted(vm.class_index.unique().astype(int)):
